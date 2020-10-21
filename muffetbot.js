@@ -69,7 +69,7 @@ const hasPrivileges = user => privileged().includes(user);
 const msgPrivileged = msg => privileged().forEach(p => success(msg, p));
 
 const filterMsg = msg => {
-	// if (hasPrivileges(msg)) return;
+	if (hasPrivileges(msg)) return;
 
 	const msgText = msg.m.toLowerCase();
 	for (const f of word_filters) {
@@ -91,7 +91,6 @@ const COMMANDS = {
 			let user = obj.user;
 			success(word_filters.join(', '), user);
 		},
-		callable: true,
 		restricted: false,
 	},
 	'!addfilters': {
@@ -136,7 +135,6 @@ const COMMANDS = {
 					user
 				);
 		},
-		callable: true,
 		restricted: true,
 	},
 	'!addfilter': {
@@ -158,7 +156,6 @@ const COMMANDS = {
 					warn(`${term} was not added because it already exists`, user);
 			}
 		},
-		callable: true,
 		restricted: true,
 	},
 	'!rmfilter': {
@@ -172,15 +169,22 @@ const COMMANDS = {
 				warn(`${term} was not found in the filter list`, user);
 			}
 		},
-		callable: true,
 		restricted: true,
 	},
 	'!commands': {
-		callable: false,
-		restricted: false,
-		get val() {
-			return Reflect.ownKeys(COMMANDS).join(', ');
+		fn: obj => {
+			const cmds = Reflect.ownKeys(COMMANDS);
+			if (hasPrivileges(obj.user)) {
+				return cmds.join(', ');
+			}
+
+			return cmds
+				.filter(cmd => {
+					!COMMANDS[cmd].restricted;
+				})
+				.join(', ');
 		},
+		restricted: false,
 	},
 };
 
@@ -195,7 +199,7 @@ cb.onMessage(msg => {
 
 			if (c.restricted && !hasPrivileges(msg.user)) break;
 
-			const res = c.callable ? c.fn(msg) : c.val;
+			const res = c.fn(msg);
 			if (typeof res === 'string') success(res, msg.user);
 			msg.m = '';
 			break;
