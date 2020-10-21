@@ -8,7 +8,7 @@ cb.settings_choices = [
 ];
 
 const CHECK_LIM = 100,
-	MAX_WHITE_SPACE = 5;
+	[MAX_WHITE_SPACE, MAX_MSG_LEN] = [5, 90];
 
 const OWNER = cb.room_slug,
 	[GREEN, RED] = ['#008000', '#FF0000'];
@@ -24,14 +24,14 @@ const success = (msg, user) => cb.sendNotice(msg, user, '', GREEN);
 const warn = (warning, user) => cb.sendNotice(warning, user, '', RED);
 
 const privileged = () => {
-	const have = [OWNER];
+	let have = [OWNER];
 	cb.getRoomUsersData(data => {
 		if (!data.success) {
 			warn('unable to get user data', OWNER);
-			return have;
+			return;
 		}
 
-		have.concat(data.data.moderator);
+		have = have.concat(data.data.moderator);
 	});
 	return have;
 };
@@ -42,7 +42,7 @@ cb.onStart(_ => {
 		...new Set(
 			filter_settings
 				.toLowerCase()
-				.split(', ')
+				.split(',')
 				.map(f => f.trim())
 		),
 	];
@@ -51,7 +51,7 @@ cb.onStart(_ => {
 const addFilter = term => {
 	term = term.trim();
 
-	if (max_whitespace_exceeded(term)) {
+	if (term.length > MAX_MSG_LEN || max_whitespace_exceeded(term)) {
 		return;
 	}
 
@@ -94,10 +94,7 @@ const filterMsg = msg => {
 
 const COMMANDS = {
 	'!filters': {
-		fn: obj => {
-			let user = obj.user;
-			success(word_filters.join(', '), user);
-		},
+		fn: _ => word_filters.join(', '),
 		restricted: false,
 	},
 	'!addfilters': {
@@ -146,7 +143,7 @@ const COMMANDS = {
 	},
 	'!addfilter': {
 		fn: obj => {
-			let [cmd, user] = [obj.m.toLowerCase(), obj.user];
+			let [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
 			let term = cmd.replace('!addfilter', '');
 
 			switch (addFilter(term)) {
@@ -167,7 +164,7 @@ const COMMANDS = {
 	},
 	'!rmfilter': {
 		fn: obj => {
-			let [cmd, user] = [obj.m.toLowerCase(), obj.user];
+			let [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
 			let term = cmd.replace('!rmfilter', '');
 
 			if (rmFilter(term)) {
@@ -198,10 +195,8 @@ const COMMANDS = {
 Object.freeze(COMMANDS);
 
 cb.onMessage(msg => {
-	msg.m.trim();
-
 	for (const cmd in COMMANDS) {
-		if (msg.m.startsWith(cmd)) {
+		if (msg.m.trimStart().startsWith(cmd)) {
 			const c = COMMANDS[cmd];
 
 			if (c.restricted && !hasPrivileges(msg.user)) break;
