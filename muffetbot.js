@@ -38,10 +38,14 @@ const privileged = () => {
 
 cb.onStart(_ => {
 	const filter_settings = cb.settings.filters;
-	word_filters = filter_settings
-		.toLowerCase()
-		.split(', ')
-		.map(f => f.trim());
+	word_filters = [
+		...new Set(
+			filter_settings
+				.toLowerCase()
+				.split(', ')
+				.map(f => f.trim())
+		),
+	];
 });
 
 const addFilter = term => {
