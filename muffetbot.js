@@ -23,6 +23,7 @@ const max_whitespace_exceeded = str => {
 
 const success = (msg, user) => cb.sendNotice(msg, user, '', GREEN);
 const warn = (warning, user) => cb.sendNotice(warning, user, '', RED);
+const shout = msg => cb.sendNotice(msg, '', GREEN);
 
 const privileged = () => {
 	let have = [OWNER];
@@ -49,6 +50,19 @@ cb.onStart(_ => {
 	];
 });
 
+cb.onBroadcastStop(_ => {
+	const now = new Date();
+	switch (now.getUTCHours()) {
+		case 5:
+			if (now.getUTCMinutes() > 50) shout('FUCK OFF!!!');
+			break;
+		case 6:
+			shout('FUCK OFF!!!');
+			break;
+		default:
+	}
+});
+
 const addFilter = term => {
 	term = term.trim();
 
@@ -64,11 +78,42 @@ const addFilter = term => {
 	return true;
 };
 
+const deferredAdd = addObj => {
+	if (!addObj.to_add.length) {
+		word_filters = [...new Set(word_filters.concat(addObj.added))];
+		return true;
+	}
+	const next = addObj.to_add.pop().trim();
+
+	if (next.length > MAX_MSG_LEN || max_whitespace_exceeded(next)) {
+		addObj.lorge.push(next);
+	} else if (word_filters.length < CHECK_LIM && word_filters.includes(next)) {
+		addObj.redundant.push(next);
+	} else {
+		addObj.added.push(next);
+	}
+	return false;
+};
+
 const rmFilter = term => {
 	term = term.trim();
 	if (word_filters.includes(term)) {
 		word_filters = word_filters.filter(w => w !== term);
 		return true;
+	}
+	return false;
+};
+
+const deferredRm = rmObj => {
+	if (!rmObj.to_remove.length) {
+		word_filters = word_filters.filter(w => !rmObj.removed.includes(w));
+		return true;
+	}
+	const next = rmObj.to_remove.pop().trim();
+	if (word_filters.includes(next)) {
+		rmObj.removed.push(next);
+	} else {
+		rmObj.not_found.push(next);
 	}
 	return false;
 };
@@ -122,7 +167,7 @@ const FUZZY = {
 			score: null,
 			indexes: null,
 			obj: null,
-		}; // hidden
+		};
 	},
 	prepareSearch: function (search) {
 		if (!search) return;
@@ -268,9 +313,9 @@ const FUZZY = {
 			}
 			if (!successStrict) {
 				score *= 1000;
-				if (typoSimpleI !== 0) score += -20; /*typoPenalty*/
+				if (typoSimpleI !== 0) score += -20;
 			} else {
-				if (typoStrictI !== 0) score += -20; /*typoPenalty*/
+				if (typoStrictI !== 0) score += -20;
 			}
 			score -= targetLen - searchLen;
 			prepared.score = score;
@@ -285,8 +330,8 @@ const FUZZY = {
 		var targetLowerCodes = prepared._targetLowerCodes;
 		var searchLen = searchLowerCodes.length;
 		var targetLen = targetLowerCodes.length;
-		var searchI = 0; // where we at
-		var targetI = 0; // where you at
+		var searchI = 0;
+		var targetI = 0;
 		var matchesSimpleLen = 0;
 
 		for (;;) {
@@ -298,7 +343,7 @@ const FUZZY = {
 				searchLowerCode = searchLowerCodes[searchI];
 			}
 			++targetI;
-			if (targetI >= targetLen) return null; // Failed to find searchI
+			if (targetI >= targetLen) return null;
 		}
 
 		var searchI = 0;
@@ -426,23 +471,14 @@ const COMMANDS = {
 				obj.user,
 			];
 
-			const res = cmds.split(',').reduce(
-				(acc, curr) => {
-					curr = curr.trim();
-					switch (addFilter(curr)) {
-						case true:
-							acc.added.push(curr);
-							break;
-						case undefined:
-							acc.lorge.push(curr);
-							break;
-						default:
-							acc.redundant.push(curr);
-					}
-					return acc;
-				},
-				{ added: [], lorge: [], redundant: [] }
-			);
+			const res = {
+				to_add: cmds.split(','),
+				added: [],
+				lorge: [],
+				redundant: [],
+			};
+			let done = deferredAdd(res);
+			while (!done) done = deferredAdd(res);
 
 			if (res.added.length)
 				msgPrivileged(`${res.added.join(', ')} added to the filter list`);
@@ -481,6 +517,37 @@ const COMMANDS = {
 				default:
 					warn(`${term} was not added because it already exists`, user);
 			}
+		},
+		restricted: true,
+	},
+	'!lemon': {
+		fn: _ => {
+			const fllw =
+				'FOLLOW!!! SUBSCRIBE ON YOUTUBE!! FOLLOW ON TWITTER AND JOIN THE PATERON!! JOIN THE DISCORD!! STEELCUTKAWAII.COM';
+			shout(fllw);
+		},
+		restricted: false,
+	},
+	'!rmfilters': {
+		fn: obj => {
+			let [cmds, user] = [
+				obj.m.replace('!rmfilters', '').toLowerCase(),
+				obj.user,
+			];
+
+			const res = { to_remove: cmds.split(','), removed: [], not_found: [] };
+
+			let done = deferredRm(res);
+			while (!done) done = deferredRm(res);
+
+			if (res.removed.length)
+				msgPrivileged(`${res.removed.join(', ')} removed from the filter list`);
+
+			if (res.not_found.length)
+				warn(
+					`${res.not_found.join(', ')} were not found in the filter list`,
+					user
+				);
 		},
 		restricted: true,
 	},
