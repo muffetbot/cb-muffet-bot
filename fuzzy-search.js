@@ -1,98 +1,3 @@
-let word_filters = [],
-	fuzzy_filters = [];
-cb.settings_choices = [
-	{
-		name: 'filters',
-		type: 'str',
-		label: 'terms for the app to silence, separated by commas',
-	},
-];
-
-const CHECK_LIM = 100,
-	[MAX_WHITE_SPACE, MAX_MSG_LEN] = [5, 90];
-
-const OWNER = cb.room_slug,
-	[GREEN, RED] = ['#008000', '#FF0000'];
-
-const max_whitespace_exceeded = str => {
-	for (let i = (count = 0); i < str.length; count += +(' ' === str[i++])) {
-		if (count > MAX_WHITE_SPACE) return true;
-	}
-	return false;
-};
-
-const success = (msg, user) => cb.sendNotice(msg, user, '', GREEN);
-const warn = (warning, user) => cb.sendNotice(warning, user, '', RED);
-
-const privileged = () => {
-	let have = [OWNER];
-	cb.getRoomUsersData(data => {
-		if (!data.success) {
-			warn('unable to get user data', OWNER);
-			return;
-		}
-
-		have = have.concat(data.data.moderator);
-	});
-	return have;
-};
-
-cb.onStart(_ => {
-	const filter_settings = cb.settings.filters;
-	word_filters = [
-		...new Set(
-			filter_settings
-				.toLowerCase()
-				.split(',')
-				.map(f => f.trim())
-		),
-	];
-});
-
-const addFilter = term => {
-	term = term.trim();
-
-	if (term.length > MAX_MSG_LEN || max_whitespace_exceeded(term)) {
-		return;
-	}
-
-	if (word_filters.length < CHECK_LIM && word_filters.includes(term))
-		return false;
-
-	word_filters.push(term);
-	word_filters = [...new Set(word_filters)];
-	return true;
-};
-
-const rmFilter = term => {
-	term = term.trim();
-	if (word_filters.includes(term)) {
-		word_filters = word_filters.filter(w => w !== term);
-		return true;
-	}
-	return false;
-};
-
-const hasPrivileges = user => privileged().includes(user);
-const msgPrivileged = msg => privileged().forEach(p => success(msg, p));
-
-const filterMsg = msg => {
-	if (hasPrivileges(msg)) return;
-
-	const msgText = msg.m.toLowerCase();
-	for (const f of word_filters) {
-		if (msgText.includes(f)) {
-			msg['X-Spam'] = true;
-
-			warn(
-				'your message contains a filtered word and was hidden from chat',
-				msg.user
-			);
-			break;
-		}
-	}
-};
-
 let preparedCache = new Map(),
 	preparedSearchCache = new Map(),
 	matchesSimple = [],
@@ -100,7 +5,7 @@ let preparedCache = new Map(),
 
 const isObj = x => typeof x === 'object';
 
-const FUZZY = {
+const fuzzy = {
 	single: function (search, target, options) {
 		if (!search) return null;
 		if (!isObj(search)) search = fuzzy.getPreparedSearch(search);
@@ -414,122 +319,31 @@ const FUZZY = {
 	},
 };
 
-const COMMANDS = {
-	'!filters': {
-		fn: _ => word_filters.join(', '),
-		restricted: false,
-	},
-	'!addfilters': {
-		fn: obj => {
-			let [cmds, user] = [
-				obj.m.replace('!addfilters', '').toLowerCase(),
-				obj.user,
-			];
+const message =
+	'Hi first time in your how room miss muffet, are you new? old are you?';
 
-			const res = cmds.split(',').reduce(
-				(acc, curr) => {
-					curr = curr.trim();
-					switch (addFilter(curr)) {
-						case true:
-							acc.added.push(curr);
-							break;
-						case undefined:
-							acc.lorge.push(curr);
-							break;
-						default:
-							acc.redundant.push(curr);
-					}
-					return acc;
-				},
-				{ added: [], lorge: [], redundant: [] }
-			);
+const scores = [];
+for (const q of 'how lion old muffet time whale yeah'.split(' ')) {
+	const query = fuzzy.single(q, message);
+	scores.push(query?.score ?? 0);
+}
 
-			if (res.added.length)
-				msgPrivileged(`${res.added.join(', ')} added to the filter list`);
-
-			if (res.lorge.length)
-				warn(
-					`${res.lorge.join(
-						', '
-					)} were too long to add, try splitting into smaller phrases`,
-					user
-				);
-
-			if (res.redundant.length)
-				warn(
-					`${res.redundant.join(', ')} are already in the filter list`,
-					user
-				);
-		},
-		restricted: true,
-	},
-	'!addfilter': {
-		fn: obj => {
-			let [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
-			let term = cmd.replace('!addfilter', '');
-
-			switch (addFilter(term)) {
-				case true:
-					msgPrivileged(`${term} was added to the filter list`);
-					break;
-				case undefined:
-					warn(
-						"it's not recommended to add long phrases, try splitting them up",
-						user
-					);
-					break;
-				default:
-					warn(`${term} was not added because it already exists`, user);
-			}
-		},
-		restricted: true,
-	},
-	'!rmfilter': {
-		fn: obj => {
-			let [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
-			let term = cmd.replace('!rmfilter', '');
-
-			if (rmFilter(term)) {
-				msgPrivileged(`${term} was removed from the filter list`);
-			} else {
-				warn(`${term} was not found in the filter list`, user);
-			}
-		},
-		restricted: true,
-	},
-	'!commands': {
-		fn: obj => {
-			const cmds = Reflect.ownKeys(COMMANDS);
-			if (hasPrivileges(obj.user)) {
-				return cmds.join(', ');
-			}
-
-			return cmds
-				.filter(cmd => {
-					!COMMANDS[cmd].restricted;
-				})
-				.join(', ');
-		},
-		restricted: false,
-	},
-};
-
-Object.freeze(COMMANDS);
-
-cb.onMessage(msg => {
-	for (const cmd in COMMANDS) {
-		if (msg.m.trimStart().startsWith(cmd)) {
-			const c = COMMANDS[cmd];
-
-			if (c.restricted && !hasPrivileges(msg.user)) break;
-
-			const res = c.fn(msg);
-			if (typeof res === 'string') success(res, msg.user);
-			msg.m = '';
-			break;
-		}
+const pos_scores = scores.filter(s => s);
+const match_probability = pos_scores.length / scores.length;
+const match_proximity = pos_scores.reduce((acc, curr) => {
+	if (curr > -300) {
+		acc += 1;
+	} else if (curr > -200) {
+		acc += 2;
+	} else if (curr > -150) {
+		acc += 3;
+	} else if (curr > -100) {
+		acc += 4;
+	} else if (curr > -50) {
+		acc += 5;
 	}
+	return acc;
+}, 0);
 
-	filterMsg(msg);
-	return msg;
-});
+console.log(match_probability);
+console.log(match_proximity);
