@@ -672,6 +672,7 @@ Object.freeze(COMMANDS);
 */
 cb.onStart(_ => {
 	const filter_settings = cb.settings.filters;
+	filter_privileged = cb.settings.filter_privileged;
 	word_filters = [
 		...new Set(
 			filter_settings
