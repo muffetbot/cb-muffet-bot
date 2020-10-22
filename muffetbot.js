@@ -138,8 +138,8 @@ const addFilter = term => {
 	}
 
 	modeled to work like a generator function. i.e. :
-	let done = deferredAdd(arr);
-	while(!done) done = deferredAdd(arr);
+	let done = deferredAdd(obj);
+	while(!done) done = deferredAdd(obj);
 */
 const deferredAdd = addObj => {
 	if (!addObj.to_add.length) {
@@ -179,8 +179,8 @@ const rmFilter = term => {
 	}
 
 	modeled to work like a generator function. i.e. :
-	let done = deferredRm(arr);
-	while(!done) done = deferredRm(arr);
+	let done = deferredRm(obj);
+	while(!done) done = deferredRm(obj);
 */
 const deferredRm = rmObj => {
 	if (!rmObj.to_remove.length) {

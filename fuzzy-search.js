@@ -367,7 +367,7 @@ function test() {
 	const scores = [];
 
 	for (const q of FUZZY_ARGS) {
-		const query = fuzzy.single(q, message);
+		const query = fuzzy.single(q, TEST_MSG);
 		scores.push(query?.score ?? 0);
 	}
 
