@@ -1,6 +1,9 @@
 /*
-	ADAPTATION OF FUZZYSORT NPM MODULE BY https://github.com/farzher
-	FOR STANDALONE USE
+	TEST MOD FOR FUZZY MATCHING
+*/
+
+/*
+	ADAPTATION OF FUZZYSORT NPM MODULE BY https://github.com/farzher FOR STANDALONE USE
 
 MIT License
 
@@ -25,12 +28,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+const MATCH_TOLERANCE = -3000,
+	DIFF_TOLERANCE = 300;
+
 let preparedCache = new Map(),
 	preparedSearchCache = new Map(),
 	matchesSimple = [],
 	matchesStrict = [];
 
 const isObj = x => typeof x === 'object';
+const avg = arr => arr.reduce((a, c) => (a += c)) / arr.length;
+const beyond_probable = arr => {
+	let average = avg(arr);
+	return !average || average < MATCH_TOLERANCE;
+};
 
 const fuzzy = {
 	single: function (search, target, options) {
@@ -346,31 +357,29 @@ const fuzzy = {
 	},
 };
 
-const message =
+const TEST_MSG =
 	'Hi first time in your how room miss muffet, are you new? old are you?';
+const FUZZY_ARGS = 'how old are you'.split(' ');
 
-const scores = [];
-for (const q of 'how lion old muffet time whale yeah'.split(' ')) {
-	const query = fuzzy.single(q, message);
-	scores.push(query?.score ?? 0);
+// returns null if match is highly improbable
+// otherwise returns true if delta between average of all scores and matched scores exceed DIFF_TOLERANCE
+function test() {
+	const scores = [];
+
+	for (const q of FUZZY_ARGS) {
+		const query = fuzzy.single(q, message);
+		scores.push(query?.score ?? 0);
+	}
+
+	if (!beyond_probable(scores)) {
+		const pos_scores = scores.filter(Boolean);
+		const scores_avg = avg(scores),
+			pos_avg = avg(pos_scores);
+
+		return scores_avg - pos_avg > DIFF_TOLERANCE;
+	} else {
+		return null;
+	}
 }
 
-const pos_scores = scores.filter(s => s);
-const match_probability = pos_scores.length / scores.length;
-const match_proximity = pos_scores.reduce((acc, curr) => {
-	if (curr > -300) {
-		acc += 1;
-	} else if (curr > -200) {
-		acc += 2;
-	} else if (curr > -150) {
-		acc += 3;
-	} else if (curr > -100) {
-		acc += 4;
-	} else if (curr > -50) {
-		acc += 5;
-	}
-	return acc;
-}, 0);
-
-console.log(match_probability);
-console.log(match_proximity);
+console.log(test());

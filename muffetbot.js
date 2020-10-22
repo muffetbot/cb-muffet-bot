@@ -1,19 +1,83 @@
-let word_filters = [],
-	fuzzy_filters = [];
+/*
+	THIS APP USES AN ADAPTATION OF FUZZYSORT NPM MODULE
+	BY https://github.com/farzher FOR STANDALONE USE
+
+MIT License
+
+Copyright (c) 2018 Stephen Kamenar
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+/*
+ GLOBAL CONSTANTS/SETTINGS
+*/
+const CHECK_LIM = 100, // number of filters to check for duplicates on insertion, lower is faster
+	MAX_FILTER_LEN = 150, // upper bound for acceptable filter string length, lower is faster
+	MAX_WHITE_SPACE = 7, // limit for allowed number of whitespace in filters, lower is faster
+	OWNER = cb.room_slug, // room owner name
+	[GREEN, RED] = ['#008000', '#FF0000'];
+
+/*
+ GLOBAL VARIABLES
+*/
+let filter_privileged = false, // variable set to cb.settings.filter_privileged on app start
+	word_filters = [], // terms to hide from chat
+	/*
+	fuzzy_filters template object:
+	{
+
+	}
+*/
+	fuzzy_filters = []; // possible triggers for fuzzyfinding FAQ's
+
+let preparedCache = new Map(),
+	preparedSearchCache = new Map(),
+	matchesSimple = [],
+	matchesStrict = [];
+
+/*
+ APP SETTINGS TO REQUEST ON INIT
+ available at runtime as attributes in cb.settings object
+*/
 cb.settings_choices = [
 	{
-		name: 'filters',
+		name: 'filter_privileged',
 		type: 'str',
-		label: 'terms for the app to silence, separated by commas',
+		label:
+			'Write `yes` or `true` if app should also silence filters from mods/owner',
+	},
+	{
+		name: 'filters', // name value sets key in cb.settings object
+		type: 'str',
+		label: 'Terms for the app to silence, separated by commas',
 	},
 ];
 
-const CHECK_LIM = 100,
-	[MAX_WHITE_SPACE, MAX_MSG_LEN] = [5, 90];
+/*
+ FUNCTION DECLARATIONS
+*/
 
-const OWNER = cb.room_slug,
-	[GREEN, RED] = ['#008000', '#FF0000'];
+// faster as a function
+const isObj = x => typeof x === 'object';
 
+// returns true if `str` incidences of whitespace exceed MAX_WHITE_SPACE
 const max_whitespace_exceeded = str => {
 	for (let i = (count = 0); i < str.length; count += +(' ' === str[i++])) {
 		if (count > MAX_WHITE_SPACE) return true;
@@ -21,10 +85,12 @@ const max_whitespace_exceeded = str => {
 	return false;
 };
 
-const success = (msg, user) => cb.sendNotice(msg, user, '', GREEN);
-const warn = (warning, user) => cb.sendNotice(warning, user, '', RED);
-const shout = msg => cb.sendNotice(msg, '', GREEN);
+// shorthands for room notices
+const success = (msg, user) => cb.sendNotice(msg, user, '', GREEN); // send green notice to user only
+const warn = (warning, user) => cb.sendNotice(warning, user, '', RED); // send red notice to user only
+const shout = msg => cb.sendNotice(msg, '', GREEN); // send green notice to room
 
+// returns array of owner + mod names
 const privileged = () => {
 	let have = [OWNER];
 	cb.getRoomUsersData(data => {
@@ -38,35 +104,17 @@ const privileged = () => {
 	return have;
 };
 
-cb.onStart(_ => {
-	const filter_settings = cb.settings.filters;
-	word_filters = [
-		...new Set(
-			filter_settings
-				.toLowerCase()
-				.split(',')
-				.map(f => f.trim())
-		),
-	];
-});
+// returns true if `user` has mod/owner privileges
+const hasPrivileges = user => privileged().includes(user);
 
-cb.onBroadcastStop(_ => {
-	const now = new Date();
-	switch (now.getUTCHours()) {
-		case 5:
-			if (now.getUTCMinutes() > 50) shout('FUCK OFF!!!');
-			break;
-		case 6:
-			shout('FUCK OFF!!!');
-			break;
-		default:
-	}
-});
+// sends notice to all mods/owners
+const msgPrivileged = msg => privileged().forEach(p => success(msg, p));
 
+// optimized for adding a single filter
 const addFilter = term => {
 	term = term.trim();
 
-	if (term.length > MAX_MSG_LEN || max_whitespace_exceeded(term)) {
+	if (term.length > MAX_FILTER_LEN || max_whitespace_exceeded(term)) {
 		return;
 	}
 
@@ -78,6 +126,21 @@ const addFilter = term => {
 	return true;
 };
 
+/*
+	optimized for adding filters as a batch
+
+	template `addObj` object:
+	{
+		to_add: [...array of filters to attempt add],
+		added: [],
+		lorge: [],
+		redundant: [],
+	}
+
+	modeled to work like a generator function. i.e. :
+	let done = deferredAdd(arr);
+	while(!done) done = deferredAdd(arr);
+*/
 const deferredAdd = addObj => {
 	if (!addObj.to_add.length) {
 		word_filters = [...new Set(word_filters.concat(addObj.added))];
@@ -85,7 +148,7 @@ const deferredAdd = addObj => {
 	}
 	const next = addObj.to_add.pop().trim();
 
-	if (next.length > MAX_MSG_LEN || max_whitespace_exceeded(next)) {
+	if (next.length > MAX_FILTER_LEN || max_whitespace_exceeded(next)) {
 		addObj.lorge.push(next);
 	} else if (word_filters.length < CHECK_LIM && word_filters.includes(next)) {
 		addObj.redundant.push(next);
@@ -95,6 +158,7 @@ const deferredAdd = addObj => {
 	return false;
 };
 
+// optimized for removing a single filter
 const rmFilter = term => {
 	term = term.trim();
 	if (word_filters.includes(term)) {
@@ -104,6 +168,20 @@ const rmFilter = term => {
 	return false;
 };
 
+/*
+	optimized for removing filters as a batch
+
+	template `rmObj` object:
+	{
+		to_remove: [...array of filters to attempt removal],
+		removed: [],
+		not_found: [],
+	}
+
+	modeled to work like a generator function. i.e. :
+	let done = deferredRm(arr);
+	while(!done) done = deferredRm(arr);
+*/
 const deferredRm = rmObj => {
 	if (!rmObj.to_remove.length) {
 		word_filters = word_filters.filter(w => !rmObj.removed.includes(w));
@@ -118,11 +196,10 @@ const deferredRm = rmObj => {
 	return false;
 };
 
-const hasPrivileges = user => privileged().includes(user);
-const msgPrivileged = msg => privileged().forEach(p => success(msg, p));
-
+// censor filter
+// obeys cb.setting.filter_privileged
 const filterMsg = msg => {
-	if (hasPrivileges(msg)) return;
+	if (!filter_privileged && hasPrivileges(msg.user)) return;
 
 	const msgText = msg.m.toLowerCase();
 	for (const f of word_filters) {
@@ -138,15 +215,15 @@ const filterMsg = msg => {
 	}
 };
 
-let preparedCache = new Map(),
-	preparedSearchCache = new Map(),
-	matchesSimple = [],
-	matchesStrict = [];
-
-const isObj = x => typeof x === 'object';
-
+/*
+ FUZZYSORT OBJECT
+ TODO: turn into a Class
+ WARNINGS:
+	 `var` keyword abused to escape scope/overwrite same idents
+	 `this` object will vary wildly with current code, will need refactoring, potentially binding?
+*/
 const FUZZY = {
-	single: function (search, target, options) {
+	single: (search, target, options) => {
 		if (!search) return null;
 		if (!isObj(search)) search = fuzzy.getPreparedSearch(search);
 
@@ -158,7 +235,7 @@ const FUZZY = {
 		var algorithm = allowTypo ? fuzzy.algorithm : fuzzy.algorithmNoTypo;
 		return algorithm(search, target, search[0]);
 	},
-	prepare: function (target) {
+	prepare: target => {
 		if (!target) return;
 		return {
 			target: target,
@@ -169,11 +246,11 @@ const FUZZY = {
 			obj: null,
 		};
 	},
-	prepareSearch: function (search) {
+	prepareSearch: search => {
 		if (!search) return;
 		return fuzzy.prepareLowerCodes(search);
 	},
-	getPrepared: function (target) {
+	getPrepared: target => {
 		if (target.length > 999) return fuzzy.prepare(target);
 		var targetPrepared = preparedCache.get(target);
 		if (targetPrepared !== undefined) return targetPrepared;
@@ -181,7 +258,7 @@ const FUZZY = {
 		preparedCache.set(target, targetPrepared);
 		return targetPrepared;
 	},
-	getPreparedSearch: function (search) {
+	getPreparedSearch: search => {
 		if (search.length > 999) return fuzzy.prepareSearch(search);
 		var searchPrepared = preparedSearchCache.get(search);
 		if (searchPrepared !== undefined) return searchPrepared;
@@ -189,7 +266,7 @@ const FUZZY = {
 		preparedSearchCache.set(search, searchPrepared);
 		return searchPrepared;
 	},
-	algorithm: function (searchLowerCodes, prepared, searchLowerCode) {
+	algorithm: (searchLowerCodes, prepared, searchLowerCode) => {
 		var targetLowerCodes = prepared._targetLowerCodes;
 		var searchLen = searchLowerCodes.length;
 		var targetLen = targetLowerCodes.length;
@@ -326,7 +403,7 @@ const FUZZY = {
 			return prepared;
 		}
 	},
-	algorithmNoTypo: function (searchLowerCodes, prepared, searchLowerCode) {
+	algorithmNoTypo: (searchLowerCodes, prepared, searchLowerCode) => {
 		var targetLowerCodes = prepared._targetLowerCodes;
 		var searchLen = searchLowerCodes.length;
 		var targetLen = targetLowerCodes.length;
@@ -407,14 +484,14 @@ const FUZZY = {
 			return prepared;
 		}
 	},
-	prepareLowerCodes: function (str) {
+	prepareLowerCodes: str => {
 		var strLen = str.length;
 		var lowerCodes = [];
 		var lower = str.toLowerCase();
 		for (var i = 0; i < strLen; ++i) lowerCodes[i] = lower.charCodeAt(i);
 		return lowerCodes;
 	},
-	prepareBeginningIndexes: function (target) {
+	prepareBeginningIndexes: target => {
 		var targetLen = target.length;
 		var beginningIndexes = [];
 		var beginningIndexesLen = 0;
@@ -434,7 +511,7 @@ const FUZZY = {
 		}
 		return beginningIndexes;
 	},
-	prepareNextBeginningIndexes: function (target) {
+	prepareNextBeginningIndexes: target => {
 		var targetLen = target.length;
 		var beginningIndexes = fuzzy.prepareBeginningIndexes(target);
 		var nextBeginningIndexes = [];
@@ -451,7 +528,7 @@ const FUZZY = {
 		}
 		return nextBeginningIndexes;
 	},
-	cleanup: function () {
+	cleanup: () => {
 		preparedCache.clear();
 		preparedSearchCache.clear();
 		matchesSimple = [];
@@ -459,6 +536,11 @@ const FUZZY = {
 	},
 };
 
+/*
+ COMMANDS OBJECT
+ `fn` inner object acts as callback
+ `restricted` inner attr hides command from non mod/owner users if set to true
+*/
 const COMMANDS = {
 	'!filters': {
 		fn: _ => word_filters.join(', '),
@@ -581,7 +663,37 @@ const COMMANDS = {
 	},
 };
 
+// freeze objects as precautionary sec measure
+Object.freeze(FUZZY);
 Object.freeze(COMMANDS);
+
+/*
+ CB CALLBACK FUNCTIONS
+*/
+cb.onStart(_ => {
+	const filter_settings = cb.settings.filters;
+	word_filters = [
+		...new Set(
+			filter_settings
+				.toLowerCase()
+				.split(',')
+				.map(f => f.trim())
+		),
+	];
+});
+
+cb.onBroadcastStop(_ => {
+	const now = new Date();
+	switch (now.getUTCHours()) {
+		case 5:
+			if (now.getUTCMinutes() > 50) shout('FUCK OFF!!!');
+			break;
+		case 6:
+			shout('FUCK OFF!!!');
+			break;
+		default:
+	}
+});
 
 cb.onMessage(msg => {
 	for (const cmd in COMMANDS) {
