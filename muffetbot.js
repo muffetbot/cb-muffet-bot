@@ -95,7 +95,7 @@ const max_whitespace_exceeded = str => {
 // shorthands for room notices
 const success = (msg, user) => cb.sendNotice(msg, user, '', GREEN); // send green notice to user only
 const warn = (warning, user) => cb.sendNotice(warning, user, '', RED); // send red notice to user only
-const shout = msg => cb.sendNotice(msg, '', GREEN); // send green notice to room
+const shout = msg => cb.sendNotice(msg, '', '', GREEN); // send green notice to room
 
 // returns array of owner + mod names
 const privileged = () => {
@@ -338,8 +338,7 @@ const FUZZY = {
 					if (searchI <= 0) {
 						++typoStrictI;
 						if (typoStrictI > searchLen - 2) break;
-						if (searchLowerCodes[typoStrictI] === searchLowerCodes[typoStrictI + 1])
-							continue;
+						if (searchLowerCodes[typoStrictI] === searchLowerCodes[typoStrictI + 1]) continue;
 						targetI = firstPossibleI;
 						continue;
 					}
@@ -519,8 +518,7 @@ const FUZZY = {
 				nextBeginningIndexes[i] = lastIsBeginning;
 			} else {
 				lastIsBeginning = beginningIndexes[++lastIsBeginningI];
-				nextBeginningIndexes[i] =
-					lastIsBeginning === undefined ? targetLen : lastIsBeginning;
+				nextBeginningIndexes[i] = lastIsBeginning === undefined ? targetLen : lastIsBeginning;
 			}
 		}
 		return nextBeginningIndexes;
@@ -545,7 +543,7 @@ const COMMANDS = {
 	},
 	'!addfilters': {
 		fn: obj => {
-			let [cmds, user] = [obj.m.replace('!addfilters', '').toLowerCase(), obj.user];
+			const [cmds, user] = [obj.m.replace('!addfilters', '').toLowerCase(), obj.user];
 
 			const res = {
 				to_add: cmds.split(','),
@@ -560,9 +558,7 @@ const COMMANDS = {
 
 			if (res.lorge.length)
 				warn(
-					`${res.lorge.join(
-						', '
-					)} were too long to add, try splitting into smaller phrases`,
+					`${res.lorge.join(', ')} were too long to add, try splitting into smaller phrases`,
 					user
 				);
 
@@ -573,8 +569,8 @@ const COMMANDS = {
 	},
 	'!addfilter': {
 		fn: obj => {
-			let [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
-			let term = cmd.replace('!addfilter', '');
+			const [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
+			const term = cmd.replace('!addfilter', '');
 
 			switch (addFilter(term)) {
 				case true:
@@ -599,7 +595,7 @@ const COMMANDS = {
 	},
 	'!rmfilters': {
 		fn: obj => {
-			let [cmds, user] = [obj.m.replace('!rmfilters', '').toLowerCase(), obj.user];
+			const [cmds, user] = [obj.m.replace('!rmfilters', '').toLowerCase(), obj.user];
 
 			const res = {
 				to_remove: cmds.split(','),
@@ -620,8 +616,8 @@ const COMMANDS = {
 	},
 	'!rmfilter': {
 		fn: obj => {
-			let [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
-			let term = cmd.replace('!rmfilter', '');
+			const [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
+			const term = cmd.replace('!rmfilter', '');
 
 			if (rmFilter(term)) {
 				msgPrivileged(`${term} was removed from the filter list`);

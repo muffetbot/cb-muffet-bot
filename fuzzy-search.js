@@ -28,8 +28,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-const MATCH_TOLERANCE = -3000,
-	DIFF_TOLERANCE = 300;
+const MATCH_TOLERANCE = -10000,
+	DIFF_TOLERANCE = 1000;
 
 let preparedCache = new Map(),
 	preparedSearchCache = new Map(),
@@ -39,7 +39,7 @@ let preparedCache = new Map(),
 const isObj = x => typeof x === 'object';
 const avg = arr => arr.reduce((a, c) => (a += c)) / arr.length;
 const beyond_probable = arr => {
-	let average = avg(arr);
+	const average = avg(arr);
 	return !average || average < MATCH_TOLERANCE;
 };
 
@@ -51,8 +51,7 @@ const fuzzy = {
 		if (!target) return null;
 		if (!isObj(target)) target = fuzzy.getPrepared(target);
 
-		var allowTypo =
-			options && options.allowTypo !== undefined ? options.allowTypo : true;
+		var allowTypo = options && options.allowTypo !== undefined ? options.allowTypo : true;
 		var algorithm = allowTypo ? fuzzy.algorithm : fuzzy.algorithmNoTypo;
 		return algorithm(search, target, search[0]);
 	},
@@ -157,11 +156,7 @@ const fuzzy = {
 					if (searchI <= 0) {
 						++typoStrictI;
 						if (typoStrictI > searchLen - 2) break;
-						if (
-							searchLowerCodes[typoStrictI] ===
-							searchLowerCodes[typoStrictI + 1]
-						)
-							continue;
+						if (searchLowerCodes[typoStrictI] === searchLowerCodes[typoStrictI + 1]) continue;
 						targetI = firstPossibleI;
 						continue;
 					}
@@ -218,8 +213,7 @@ const fuzzy = {
 			score -= targetLen - searchLen;
 			prepared.score = score;
 			prepared.indexes = new Array(matchesBestLen);
-			for (var i = matchesBestLen - 1; i >= 0; --i)
-				prepared.indexes[i] = matchesBest[i];
+			for (var i = matchesBestLen - 1; i >= 0; --i) prepared.indexes[i] = matchesBest[i];
 
 			return prepared;
 		}
@@ -299,8 +293,7 @@ const fuzzy = {
 			score -= targetLen - searchLen;
 			prepared.score = score;
 			prepared.indexes = new Array(matchesBestLen);
-			for (var i = matchesBestLen - 1; i >= 0; --i)
-				prepared.indexes[i] = matchesBest[i];
+			for (var i = matchesBestLen - 1; i >= 0; --i) prepared.indexes[i] = matchesBest[i];
 
 			return prepared;
 		}
@@ -343,8 +336,7 @@ const fuzzy = {
 				nextBeginningIndexes[i] = lastIsBeginning;
 			} else {
 				lastIsBeginning = beginningIndexes[++lastIsBeginningI];
-				nextBeginningIndexes[i] =
-					lastIsBeginning === undefined ? targetLen : lastIsBeginning;
+				nextBeginningIndexes[i] = lastIsBeginning === undefined ? targetLen : lastIsBeginning;
 			}
 		}
 		return nextBeginningIndexes;
@@ -357,29 +349,63 @@ const fuzzy = {
 	},
 };
 
-const TEST_MSG =
-	'Hi first time in your how room miss muffet, are you new? old are you?';
-const FUZZY_ARGS = 'how old are you'.split(' ');
+const TEST_MSG = 'Hi first time in your how room miss muffet, are you new? old are you?';
+const FUZZY_ARGS = 'how firts muffet giraffe lights'.split(' ');
 
 // returns null if match is highly improbable
 // otherwise returns true if delta between average of all scores and matched scores exceed DIFF_TOLERANCE
 function test() {
-	const scores = [];
+	const stats = {
+		scores: [],
+		get pos_scores() {
+			return this.scores.filter(Boolean) || new Error('no matches');
+		},
+		get match_ratio() {
+			return this.pos_scores.length / this.scores.length;
+		},
+		get mean() {
+			return avg(this.scores);
+		},
+		get match_mean() {
+			return avg(this.pos_scores);
+		},
+		get min_max() {
+			const pos = this.pos_scores;
+			return [Math.min(...pos), Math.max(...pos)];
+		},
+		get range() {
+			const [min, max] = this.min_max;
+			return max - min;
+		},
+		get std_deviation() {
+			const mean = this.mean;
+			const variance = avg(this.scores.map(s => Math.pow(s - mean, 2)));
+			return Math.sqrt(variance);
+		},
+		get match_std_deviation() {
+			const mean = this.match_mean;
+			const variance = avg(this.pos_scores.map(s => Math.pow(s - mean, 2)));
+			return Math.sqrt(variance);
+		},
+		get z_scores() {
+			const mean = this.mean,
+				std_dev = this.std_deviation;
+			return this.scores.map(s => s - mean / std_dev);
+		},
+		get match_z_scores() {
+			const mean = this.match_mean,
+				std_dev = this.match_std_deviation;
+			return this.scores.map(s => s - mean / std_dev);
+		},
+	};
 
 	for (const q of FUZZY_ARGS) {
-		const query = fuzzy.single(q, TEST_MSG);
-		scores.push(query?.score ?? 0);
+		const query = fuzzy.single(q, TEST_MSG, { allowTypo: true });
+		stats.scores.push(query?.score ?? 0);
 	}
 
-	if (!beyond_probable(scores)) {
-		const pos_scores = scores.filter(Boolean);
-		const scores_avg = avg(scores),
-			pos_avg = avg(pos_scores);
-
-		return scores_avg - pos_avg > DIFF_TOLERANCE;
-	} else {
-		return null;
-	}
+	return stats;
 }
 
-console.log(test());
+const results = test();
+console.table(results);
