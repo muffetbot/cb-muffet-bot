@@ -638,11 +638,7 @@ const COMMANDS = {
 				return cmds.join(', ');
 			}
 
-			return cmds
-				.filter(cmd => {
-					!COMMANDS[cmd].restricted;
-				})
-				.join(', ');
+			return cmds.filter(cmd => !COMMANDS[cmd].restricted).join(', ');
 		},
 		restricted: false,
 	},
