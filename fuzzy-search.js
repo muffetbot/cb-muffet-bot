@@ -28,9 +28,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-const MATCH_TOLERANCE = -10000,
-	DIFF_TOLERANCE = 1000;
-
 let preparedCache = new Map(),
 	preparedSearchCache = new Map(),
 	matchesSimple = [],
@@ -38,10 +35,6 @@ let preparedCache = new Map(),
 
 const isObj = x => typeof x === 'object';
 const avg = arr => arr.reduce((a, c) => (a += c)) / arr.length;
-const beyond_probable = arr => {
-	const average = avg(arr);
-	return !average || average < MATCH_TOLERANCE;
-};
 
 const fuzzy = {
 	single: function (search, target, options) {
@@ -352,8 +345,6 @@ const fuzzy = {
 const TEST_MSG = 'Hi first time in your how room miss muffet, are you new? old are you?';
 const FUZZY_ARGS = 'how firts muffet giraffe lights'.split(' ');
 
-// returns null if match is highly improbable
-// otherwise returns true if delta between average of all scores and matched scores exceed DIFF_TOLERANCE
 function test() {
 	const stats = {
 		scores: [],
