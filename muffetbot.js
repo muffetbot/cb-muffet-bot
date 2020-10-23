@@ -67,8 +67,7 @@ cb.settings_choices = [
 	{
 		name: 'filter_privileged',
 		type: 'str',
-		label:
-			'Write `yes` or `true` if app should also silence filters from mods/owner',
+		label: 'Write `yes` or `true` if app should also silence filters from mods/owner',
 		required: false,
 	},
 	{
@@ -126,8 +125,7 @@ const addFilter = term => {
 		return;
 	}
 
-	if (word_filters.length < CHECK_LIM && word_filters.includes(term))
-		return false;
+	if (word_filters.length < CHECK_LIM && word_filters.includes(term)) return false;
 
 	word_filters.push(term);
 	word_filters = [...new Set(word_filters)];
@@ -214,10 +212,7 @@ const filterMsg = msg => {
 		if (msgText.includes(f)) {
 			msg['X-Spam'] = true;
 
-			warn(
-				'your message contains a filtered word and was hidden from chat',
-				msg.user
-			);
+			warn('your message contains a filtered word and was hidden from chat', msg.user);
 			break;
 		}
 	}
@@ -238,10 +233,7 @@ const FUZZY = {
 		if (!target) return null;
 		if (!isObj(target)) target = fuzzy.getPrepared(target);
 
-		var allowTypo =
-			options && options.allowTypo !== undefined
-				? options.allowTypo
-				: true;
+		var allowTypo = options && options.allowTypo !== undefined ? options.allowTypo : true;
 		var algorithm = allowTypo ? fuzzy.algorithm : fuzzy.algorithmNoTypo;
 		return algorithm(search, target, search[0]);
 	},
@@ -338,9 +330,7 @@ const FUZZY = {
 				prepared.target
 			);
 		var firstPossibleI = (targetI =
-			matchesSimple[0] === 0
-				? 0
-				: nextBeginningIndexes[matchesSimple[0] - 1]);
+			matchesSimple[0] === 0 ? 0 : nextBeginningIndexes[matchesSimple[0] - 1]);
 
 		if (targetI !== targetLen)
 			for (;;) {
@@ -348,10 +338,7 @@ const FUZZY = {
 					if (searchI <= 0) {
 						++typoStrictI;
 						if (typoStrictI > searchLen - 2) break;
-						if (
-							searchLowerCodes[typoStrictI] ===
-							searchLowerCodes[typoStrictI + 1]
-						)
+						if (searchLowerCodes[typoStrictI] === searchLowerCodes[typoStrictI + 1])
 							continue;
 						targetI = firstPossibleI;
 						continue;
@@ -409,8 +396,7 @@ const FUZZY = {
 			score -= targetLen - searchLen;
 			prepared.score = score;
 			prepared.indexes = new Array(matchesBestLen);
-			for (var i = matchesBestLen - 1; i >= 0; --i)
-				prepared.indexes[i] = matchesBest[i];
+			for (var i = matchesBestLen - 1; i >= 0; --i) prepared.indexes[i] = matchesBest[i];
 
 			return prepared;
 		}
@@ -445,9 +431,7 @@ const FUZZY = {
 				prepared.target
 			);
 		var firstPossibleI = (targetI =
-			matchesSimple[0] === 0
-				? 0
-				: nextBeginningIndexes[matchesSimple[0] - 1]);
+			matchesSimple[0] === 0 ? 0 : nextBeginningIndexes[matchesSimple[0] - 1]);
 
 		if (targetI !== targetLen)
 			for (;;) {
@@ -458,8 +442,7 @@ const FUZZY = {
 					var lastMatch = matchesStrict[--matchesStrictLen];
 					targetI = nextBeginningIndexes[lastMatch];
 				} else {
-					var isMatch =
-						searchLowerCodes[searchI] === targetLowerCodes[targetI];
+					var isMatch = searchLowerCodes[searchI] === targetLowerCodes[targetI];
 					if (isMatch) {
 						matchesStrict[matchesStrictLen++] = targetI;
 						++searchI;
@@ -493,8 +476,7 @@ const FUZZY = {
 			score -= targetLen - searchLen;
 			prepared.score = score;
 			prepared.indexes = new Array(matchesBestLen);
-			for (var i = matchesBestLen - 1; i >= 0; --i)
-				prepared.indexes[i] = matchesBest[i];
+			for (var i = matchesBestLen - 1; i >= 0; --i) prepared.indexes[i] = matchesBest[i];
 
 			return prepared;
 		}
@@ -519,8 +501,7 @@ const FUZZY = {
 				isUpper ||
 				(targetCode >= 97 && targetCode <= 122) ||
 				(targetCode >= 48 && targetCode <= 57);
-			var isBeginning =
-				(isUpper && !wasUpper) || !wasAlphanum || !isAlphanum;
+			var isBeginning = (isUpper && !wasUpper) || !wasAlphanum || !isAlphanum;
 			wasUpper = isUpper;
 			wasAlphanum = isAlphanum;
 			if (isBeginning) beginningIndexes[beginningIndexesLen++] = i;
@@ -564,10 +545,7 @@ const COMMANDS = {
 	},
 	'!addfilters': {
 		fn: obj => {
-			let [cmds, user] = [
-				obj.m.replace('!addfilters', '').toLowerCase(),
-				obj.user,
-			];
+			let [cmds, user] = [obj.m.replace('!addfilters', '').toLowerCase(), obj.user];
 
 			const res = {
 				to_add: cmds.split(','),
@@ -578,10 +556,7 @@ const COMMANDS = {
 			let done = deferredAdd(res);
 			while (!done) done = deferredAdd(res);
 
-			if (res.added.length)
-				msgPrivileged(
-					`${res.added.join(', ')} added to the filter list`
-				);
+			if (res.added.length) msgPrivileged(`${res.added.join(', ')} added to the filter list`);
 
 			if (res.lorge.length)
 				warn(
@@ -592,12 +567,7 @@ const COMMANDS = {
 				);
 
 			if (res.redundant.length)
-				warn(
-					`${res.redundant.join(
-						', '
-					)} are already in the filter list`,
-					user
-				);
+				warn(`${res.redundant.join(', ')} are already in the filter list`, user);
 		},
 		restricted: true,
 	},
@@ -611,16 +581,10 @@ const COMMANDS = {
 					msgPrivileged(`${term} was added to the filter list`);
 					break;
 				case undefined:
-					warn(
-						"it's not recommended to add long phrases, try splitting them up",
-						user
-					);
+					warn("it's not recommended to add long phrases, try splitting them up", user);
 					break;
 				default:
-					warn(
-						`${term} was not added because it already exists`,
-						user
-					);
+					warn(`${term} was not added because it already exists`, user);
 			}
 		},
 		restricted: true,
@@ -635,10 +599,7 @@ const COMMANDS = {
 	},
 	'!rmfilters': {
 		fn: obj => {
-			let [cmds, user] = [
-				obj.m.replace('!rmfilters', '').toLowerCase(),
-				obj.user,
-			];
+			let [cmds, user] = [obj.m.replace('!rmfilters', '').toLowerCase(), obj.user];
 
 			const res = {
 				to_remove: cmds.split(','),
@@ -650,17 +611,10 @@ const COMMANDS = {
 			while (!done) done = deferredRm(res);
 
 			if (res.removed.length)
-				msgPrivileged(
-					`${res.removed.join(', ')} removed from the filter list`
-				);
+				msgPrivileged(`${res.removed.join(', ')} removed from the filter list`);
 
 			if (res.not_found.length)
-				warn(
-					`${res.not_found.join(
-						', '
-					)} were not found in the filter list`,
-					user
-				);
+				warn(`${res.not_found.join(', ')} were not found in the filter list`, user);
 		},
 		restricted: true,
 	},
