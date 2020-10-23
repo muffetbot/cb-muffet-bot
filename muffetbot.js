@@ -58,10 +58,18 @@ let preparedCache = new Map(),
 */
 cb.settings_choices = [
 	{
+		name: 'leave_msg',
+		default: 'FUCK OFF!!!',
+		type: 'str',
+		label: 'This message will display when the stream ends',
+		required: false,
+	},
+	{
 		name: 'filter_privileged',
 		type: 'str',
 		label:
 			'Write `yes` or `true` if app should also silence filters from mods/owner',
+		required: false,
 	},
 	{
 		name: 'filters', // name value sets key in cb.settings object
@@ -231,7 +239,9 @@ const FUZZY = {
 		if (!isObj(target)) target = fuzzy.getPrepared(target);
 
 		var allowTypo =
-			options && options.allowTypo !== undefined ? options.allowTypo : true;
+			options && options.allowTypo !== undefined
+				? options.allowTypo
+				: true;
 		var algorithm = allowTypo ? fuzzy.algorithm : fuzzy.algorithmNoTypo;
 		return algorithm(search, target, search[0]);
 	},
@@ -328,7 +338,9 @@ const FUZZY = {
 				prepared.target
 			);
 		var firstPossibleI = (targetI =
-			matchesSimple[0] === 0 ? 0 : nextBeginningIndexes[matchesSimple[0] - 1]);
+			matchesSimple[0] === 0
+				? 0
+				: nextBeginningIndexes[matchesSimple[0] - 1]);
 
 		if (targetI !== targetLen)
 			for (;;) {
@@ -433,7 +445,9 @@ const FUZZY = {
 				prepared.target
 			);
 		var firstPossibleI = (targetI =
-			matchesSimple[0] === 0 ? 0 : nextBeginningIndexes[matchesSimple[0] - 1]);
+			matchesSimple[0] === 0
+				? 0
+				: nextBeginningIndexes[matchesSimple[0] - 1]);
 
 		if (targetI !== targetLen)
 			for (;;) {
@@ -444,7 +458,8 @@ const FUZZY = {
 					var lastMatch = matchesStrict[--matchesStrictLen];
 					targetI = nextBeginningIndexes[lastMatch];
 				} else {
-					var isMatch = searchLowerCodes[searchI] === targetLowerCodes[targetI];
+					var isMatch =
+						searchLowerCodes[searchI] === targetLowerCodes[targetI];
 					if (isMatch) {
 						matchesStrict[matchesStrictLen++] = targetI;
 						++searchI;
@@ -504,7 +519,8 @@ const FUZZY = {
 				isUpper ||
 				(targetCode >= 97 && targetCode <= 122) ||
 				(targetCode >= 48 && targetCode <= 57);
-			var isBeginning = (isUpper && !wasUpper) || !wasAlphanum || !isAlphanum;
+			var isBeginning =
+				(isUpper && !wasUpper) || !wasAlphanum || !isAlphanum;
 			wasUpper = isUpper;
 			wasAlphanum = isAlphanum;
 			if (isBeginning) beginningIndexes[beginningIndexesLen++] = i;
@@ -563,7 +579,9 @@ const COMMANDS = {
 			while (!done) done = deferredAdd(res);
 
 			if (res.added.length)
-				msgPrivileged(`${res.added.join(', ')} added to the filter list`);
+				msgPrivileged(
+					`${res.added.join(', ')} added to the filter list`
+				);
 
 			if (res.lorge.length)
 				warn(
@@ -575,7 +593,9 @@ const COMMANDS = {
 
 			if (res.redundant.length)
 				warn(
-					`${res.redundant.join(', ')} are already in the filter list`,
+					`${res.redundant.join(
+						', '
+					)} are already in the filter list`,
 					user
 				);
 		},
@@ -597,7 +617,10 @@ const COMMANDS = {
 					);
 					break;
 				default:
-					warn(`${term} was not added because it already exists`, user);
+					warn(
+						`${term} was not added because it already exists`,
+						user
+					);
 			}
 		},
 		restricted: true,
@@ -617,17 +640,25 @@ const COMMANDS = {
 				obj.user,
 			];
 
-			const res = { to_remove: cmds.split(','), removed: [], not_found: [] };
+			const res = {
+				to_remove: cmds.split(','),
+				removed: [],
+				not_found: [],
+			};
 
 			let done = deferredRm(res);
 			while (!done) done = deferredRm(res);
 
 			if (res.removed.length)
-				msgPrivileged(`${res.removed.join(', ')} removed from the filter list`);
+				msgPrivileged(
+					`${res.removed.join(', ')} removed from the filter list`
+				);
 
 			if (res.not_found.length)
 				warn(
-					`${res.not_found.join(', ')} were not found in the filter list`,
+					`${res.not_found.join(
+						', '
+					)} were not found in the filter list`,
 					user
 				);
 		},
@@ -671,8 +702,10 @@ Object.freeze(COMMANDS);
  CB CALLBACK FUNCTIONS
 */
 cb.onStart(_ => {
+	const p_setting = cb.settings.filter_privileged.toLowerCase().trim();
+	filter_privileged = p_setting === 'yes' || p_setting === 'true';
+
 	const filter_settings = cb.settings.filters;
-	filter_privileged = cb.settings.filter_privileged;
 	word_filters = [
 		...new Set(
 			filter_settings
@@ -684,21 +717,25 @@ cb.onStart(_ => {
 });
 
 cb.onBroadcastStop(_ => {
-	const now = new Date();
-	switch (now.getUTCHours()) {
-		case 5:
-			if (now.getUTCMinutes() > 50) shout('FUCK OFF!!!');
-			break;
-		case 6:
-			shout('FUCK OFF!!!');
-			break;
-		default:
+	const bye_message = cb.settings.leave_msg;
+
+	if (bye_message) {
+		const now = new Date();
+		switch (now.getUTCHours()) {
+			case 5:
+				if (now.getUTCMinutes() > 50) shout(bye_message);
+				break;
+			case 6:
+				shout(bye_message);
+				break;
+			default:
+		}
 	}
 });
 
 cb.onMessage(msg => {
 	for (const cmd in COMMANDS) {
-		if (msg.m.trimStart().startsWith(cmd)) {
+		if (msg.m.trimLeft().startsWith(cmd)) {
 			const c = COMMANDS[cmd];
 
 			if (c.restricted && !hasPrivileges(msg.user)) break;
