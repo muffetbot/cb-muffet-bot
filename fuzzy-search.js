@@ -256,6 +256,7 @@ const fuzzy = {
 					if (isMatch) {
 						matchesStrict[matchesStrictLen++] = targetI;
 						++searchI;
+						console.log(searchI, searchLen);
 						if (searchI === searchLen) {
 							successStrict = true;
 							break;

@@ -22,7 +22,7 @@ class Analyzer {
 	}
 
 	get min_max() {
-		const pos = this.pos_scores;
+		const pos = this.match_scores;
 		return [Math.min(...pos), Math.max(...pos)];
 	}
 
@@ -39,7 +39,7 @@ class Analyzer {
 
 	get match_std_deviation() {
 		const mean = this.match_mean;
-		const variance = avg(this.pos_scores.map(s => Math.pow(s - mean, 2)));
+		const variance = Analyzer.avg(this.match_scores.map(s => Math.pow(s - mean, 2)));
 		return Math.sqrt(variance);
 	}
 
@@ -58,6 +58,9 @@ class Analyzer {
 	plot() {
 		let stats = {};
 		for (const attr of [
+			'scores',
+			'z_scores',
+			'match_z_scores',
 			'match_ratio',
 			'mean',
 			'match_mean',
@@ -65,31 +68,28 @@ class Analyzer {
 			'range',
 			'std_deviation',
 			'match_std_deviation',
-			'z_scores',
-			'match_z_scores',
 		]) {
 			stats[attr] = this[attr];
 		}
 
-		console.table(stats);
+		return stats;
 	}
 }
 
 class Fuzzy extends Analyzer {
-	prepared_cache = new Map();
 	static prepared_query_cache = new Map();
 	matches_simple = [];
 	matches_strict = [];
 
 	constructor(target, ...queries) {
 		super();
-		this.getPrepared(target);
+		this.target = target;
 		this.queries = [...queries].map(q => Fuzzy.getPreparedQuery(q));
 		return this;
 	}
 
 	algorithm(query_lower_codes) {
-		const target_lower_codes = this.prepared.target_lower_codes,
+		const target_lower_codes = this.target_lower_codes,
 			query_len = query_lower_codes.length,
 			target_len = target_lower_codes.length;
 
@@ -139,31 +139,21 @@ class Fuzzy extends Analyzer {
 
 		query_i = 0;
 		let typo_strict_i = 0,
-			matches_strict_len = 0;
-		let success_strict = false,
-			next_beginning_indexes = this.prepared.next_beginning_indexes;
-
-		if (next_beginning_indexes === null) {
-			next_beginning_indexes = this.prepared.next_beginning_indexes = this.prepareNextBeginningIndexes(
-				this.target
-			);
-		}
+			matches_strict_len = 0,
+			success_strict = false;
+		const next_beginning_indexes = this.next_beginning_indexes;
 
 		const first_possible_i =
 			this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
 		target_i = first_possible_i;
 
-		if (target_i !== target_len) {
+		if (target_i !== target_len)
 			while (true) {
 				if (target_i >= target_len) {
 					if (query_i <= 0) {
 						++typo_strict_i;
 						if (typo_strict_i > query_len - 2) break;
-						if (
-							query_lower_codes[typo_strict_i] ===
-							query_lower_codes[typo_strict_i + 1]
-						)
-							continue;
+						if (query_lower_codes[typo_strict_i] === query_lower_codes[typo_strict_i + 1]) continue;
 						query_i = first_possible_i;
 						continue;
 					}
@@ -174,7 +164,7 @@ class Fuzzy extends Analyzer {
 				} else {
 					let is_match =
 						query_lower_codes[
-							typo_strict_i === 0
+							!typo_strict_i
 								? query_i
 								: typo_strict_i === query_i
 								? query_i + 1
@@ -195,37 +185,103 @@ class Fuzzy extends Analyzer {
 						target_i = next_beginning_indexes[target_i];
 					}
 				}
+				if (target_i === undefined) break;
 			}
+
+		{
+			const matches_best = success_strict ? this.matches_strict : this.matches_simple;
+
+			let score = 0,
+				last_target_i = -1;
+			for (let i = 0; i < query_len; ++i) {
+				target_i = matches_best[i];
+				if (last_target_i !== target_i - 1) score -= target_i;
+				last_target_i = target_i;
+			}
+
+			if (!success_strict) {
+				score *= 1000;
+				if (typo_simple_i) score -= 20;
+			} else {
+				if (typo_strict_i) score -= 20;
+			}
+
+			score -= target_len - query_len;
+			return score;
 		}
-
-		const matches_best = success_strict ? this.matches_strict : this.matches_simple;
-
-		let score = 0,
-			last_target_i = -1;
-		for (let i = 0; i < query_len; i++) {
-			target_i = matches_best[i];
-			if (last_target_i !== target_i - 1) score -= target_i;
-			last_target_i = target_i;
-		}
-
-		if (!success_strict) {
-			score *= 1000;
-			if (typo_simple_i !== 0) score -= 20;
-		} else {
-			if (typo_strict_i !== 0) score -= 20;
-		}
-
-		score -= target_len - query_len;
-		return score;
 	}
 
-	getPrepared(target) {
-		if (target.length > 999) return this.prepare(target);
-		let target_prepared = this.prepared_cache.get(target);
-		if (target_prepared !== undefined) return target_prepared;
-		target_prepared = this.prepare(target);
-		this.prepared_cache.set(target, target_prepared);
-		return target_prepared;
+	algorithmPunishTypo(query_lower_codes) {
+		const target_lower_codes = this.target_lower_codes,
+			query_len = query_lower_codes.length,
+			target_len = target_lower_codes.length;
+
+		let query_i = 0,
+			target_i = 0,
+			matches_simple_len = 0,
+			query_lower_code = query_lower_codes[0];
+
+		while (true) {
+			let is_match = query_lower_code === target_lower_codes[target_i];
+			if (is_match) {
+				this.matches_simple[matches_simple_len++] = target_i;
+				++query_i;
+				if (query_i === query_len) break;
+				query_lower_code = query_lower_codes[query_i];
+			}
+
+			++target_i;
+			if (target_i >= target_len) return 0;
+		}
+
+		query_i = 0;
+		let matches_strict_len = 0,
+			success_strict = false;
+		const next_beginning_indexes = this.next_beginning_indexes;
+
+		target_i =
+			this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
+
+		if (target_i !== target_len)
+			while (true) {
+				if (target_i >= target_len) {
+					if (query_i <= 0) break;
+
+					--query_i;
+					let last_match = this.matches_strict[--matches_strict_len];
+					target_i = next_beginning_indexes[last_match];
+				} else {
+					let is_match = query_lower_codes[query_i] === target_lower_codes[target_i];
+
+					if (is_match) {
+						this.matches_strict[matches_strict_len++] = target_i;
+						++query_i;
+						if (query_i === query_len) {
+							success_strict = true;
+							break;
+						}
+						++target_i;
+					} else {
+						target_i = next_beginning_indexes[target_i];
+					}
+				}
+			}
+		{
+			const matches_best = success_strict ? this.matches_strict : this.matches_simple;
+
+			let score = 0,
+				last_target_i = -1;
+			for (let i = 0; i < query_len; ++i) {
+				target_i = matches_best[i];
+				if (last_target_i !== target_i - 1) score -= target_i;
+				last_target_i = target_i;
+			}
+
+			if (!success_strict) score *= 1000;
+
+			score -= target_len - query_len;
+			return score;
+		}
 	}
 
 	static getPreparedQuery(query) {
@@ -237,13 +293,12 @@ class Fuzzy extends Analyzer {
 		return query_prepared;
 	}
 
-	prepare(target) {
-		this.target = target;
+	set target(target) {
+		this._target = target;
 		this.target_len = target.length;
-		this.prepared = {
-			target_lower_codes: Fuzzy.prepareLowerCodes(target),
-			next_beginning_indexes: null,
-		};
+
+		this.target_lower_codes = Fuzzy.prepareLowerCodes(target);
+		this.next_beginning_indexes = this.prepareNextBeginningIndexes(target);
 	}
 
 	static prepareLowerCodes(str) {
@@ -264,7 +319,7 @@ class Fuzzy extends Analyzer {
 			was_alpha_num = false;
 
 		for (let i = 0; i < this.target_len; i++) {
-			let target_code = this.target.charCodeAt(i),
+			let target_code = this._target.charCodeAt(i),
 				is_upper = target_code >= 65 && target_code <= 90,
 				is_alpha_num =
 					is_upper ||
@@ -298,17 +353,19 @@ class Fuzzy extends Analyzer {
 	}
 
 	cleanup() {
-		this.prepared_cache.clear();
-		Fuzzy.prepared_query_cache.clear();
 		this.matches_simple.length = this.matches_strict.length = 0;
 	}
 
-	run() {
+	static clear() {
+		this.prepared_query_cache.clear();
+	}
+
+	run(allow_typo = true) {
 		for (const query of this.queries) {
-			const score = this.algorithm(query);
+			const score = allow_typo ? this.algorithm(query) : this.algorithmPunishTypo(query);
 			this.scores.push(score);
 		}
-		return this.scores;
+		return this;
 	}
 }
 
@@ -317,11 +374,8 @@ const FUZZY_ARGS = 'how firts muffet giraffe lights'.split(' ');
 
 function test() {
 	const fuzz = new Fuzzy(TEST_MSG, ...FUZZY_ARGS);
-	const scores = fuzz.run();
-
-	console.log(scores);
-
-	fuzz.plot();
+	return fuzz.run().plot();
 }
 
-test();
+const results = test();
+console.table(results);
