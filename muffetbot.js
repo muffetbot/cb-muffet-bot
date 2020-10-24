@@ -47,11 +47,6 @@ let filter_privileged = false, // variable set to cb.settings.filter_privileged 
 */
 	fuzzy_filters = []; // possible triggers for fuzzyfinding FAQ's
 
-let preparedCache = new Map(),
-	preparedSearchCache = new Map(),
-	matchesSimple = [],
-	matchesStrict = [];
-
 /*
  APP SETTINGS TO REQUEST ON INIT
  available at runtime as attributes in cb.settings object
@@ -74,6 +69,7 @@ cb.settings_choices = [
 		name: 'filters', // name value sets key in cb.settings object
 		type: 'str',
 		label: 'Terms for the app to silence, separated by commas',
+		required: false,
 	},
 ];
 
@@ -219,317 +215,388 @@ const filterMsg = msg => {
 };
 
 /*
- FUZZYSORT OBJECT
- TODO: turn into a Class
- WARNINGS:
-	 `var` keyword abused to escape scope/overwrite same idents
-	 `this` object will vary wildly with current code, will need refactoring, potentially binding?
+ provides getters for statistical analysis for fuzzy matching
+ plot method for testing, preferrably with console.table()
 */
-const FUZZY = {
-	single: (search, target, options) => {
-		if (!search) return null;
-		if (!isObj(search)) search = fuzzy.getPreparedSearch(search);
+class Analyzer {
+	scores = [];
 
-		if (!target) return null;
-		if (!isObj(target)) target = fuzzy.getPrepared(target);
+	static avg(arr) {
+		return arr.reduce((a, c) => (a += c)) / arr.length;
+	}
 
-		var allowTypo = options && options.allowTypo !== undefined ? options.allowTypo : true;
-		var algorithm = allowTypo ? fuzzy.algorithm : fuzzy.algorithmNoTypo;
-		return algorithm(search, target, search[0]);
-	},
-	prepare: target => {
-		if (!target) return;
-		return {
-			target: target,
-			_targetLowerCodes: fuzzy.prepareLowerCodes(target),
-			_nextBeginningIndexes: null,
-			score: null,
-			indexes: null,
-			obj: null,
-		};
-	},
-	prepareSearch: search => {
-		if (!search) return;
-		return fuzzy.prepareLowerCodes(search);
-	},
-	getPrepared: target => {
-		if (target.length > 999) return fuzzy.prepare(target);
-		var targetPrepared = preparedCache.get(target);
-		if (targetPrepared !== undefined) return targetPrepared;
-		targetPrepared = fuzzy.prepare(target);
-		preparedCache.set(target, targetPrepared);
-		return targetPrepared;
-	},
-	getPreparedSearch: search => {
-		if (search.length > 999) return fuzzy.prepareSearch(search);
-		var searchPrepared = preparedSearchCache.get(search);
-		if (searchPrepared !== undefined) return searchPrepared;
-		searchPrepared = fuzzy.prepareSearch(search);
-		preparedSearchCache.set(search, searchPrepared);
-		return searchPrepared;
-	},
-	algorithm: (searchLowerCodes, prepared, searchLowerCode) => {
-		var targetLowerCodes = prepared._targetLowerCodes;
-		var searchLen = searchLowerCodes.length;
-		var targetLen = targetLowerCodes.length;
-		var searchI = 0;
-		var targetI = 0;
-		var typoSimpleI = 0;
-		var matchesSimpleLen = 0;
+	get match_scores() {
+		return this.scores.filter(Boolean);
+	}
 
-		for (;;) {
-			var isMatch = searchLowerCode === targetLowerCodes[targetI];
-			if (isMatch) {
-				matchesSimple[matchesSimpleLen++] = targetI;
-				++searchI;
-				if (searchI === searchLen) break;
-				searchLowerCode =
-					searchLowerCodes[
-						typoSimpleI === 0
-							? searchI
-							: typoSimpleI === searchI
-							? searchI + 1
-							: typoSimpleI === searchI - 1
-							? searchI - 1
-							: searchI
+	get match_ratio() {
+		return this.match_scores.length / this.scores.length;
+	}
+
+	get mean() {
+		return Analyzer.avg(this.scores);
+	}
+
+	get match_mean() {
+		return Analyzer.avg(this.match_scores);
+	}
+
+	get min_max() {
+		const pos = this.match_scores;
+		return [Math.min(...pos), Math.max(...pos)];
+	}
+
+	get range() {
+		const [min, max] = this.min_max;
+		return max - min;
+	}
+
+	get std_deviation() {
+		const mean = this.mean;
+		const variance = Analyzer.avg(this.scores.map(s => Math.pow(s - mean, 2)));
+		return Math.sqrt(variance);
+	}
+
+	get match_std_deviation() {
+		const mean = this.match_mean;
+		const variance = Analyzer.avg(this.match_scores.map(s => Math.pow(s - mean, 2)));
+		return Math.sqrt(variance);
+	}
+
+	get z_scores() {
+		const mean = this.mean,
+			std_dev = this.std_deviation;
+		return this.scores.map(s => s - mean / std_dev);
+	}
+
+	get match_z_scores() {
+		const mean = this.match_mean,
+			std_dev = this.match_std_deviation;
+		return this.scores.map(s => s - mean / std_dev);
+	}
+
+	plot() {
+		let stats = {};
+		for (const attr of [
+			'scores',
+			'z_scores',
+			'match_z_scores',
+			'match_ratio',
+			'mean',
+			'match_mean',
+			'min_max',
+			'range',
+			'std_deviation',
+			'match_std_deviation',
+		]) {
+			stats[attr] = this[attr];
+		}
+
+		return stats;
+	}
+}
+
+/*
+ Fuzzy class much easier for instancing
+ cache is static, so can be cleared after set interval
+ self-purging for garbage collection
+ USAGE: access data via Analyzer parent class methods after using run() method
+ 
+ TODO: maybe use WeakMap instead of Map for cache
+*/
+class Fuzzy extends Analyzer {
+	static prepared_query_cache = new Map();
+	matches_simple = [];
+	matches_strict = [];
+
+	constructor(target, ...queries) {
+		super();
+		this.target = target;
+		this.queries = [...queries].map(q => Fuzzy.getPreparedQuery(q));
+		return this;
+	}
+
+	algorithm(query_lower_codes) {
+		const target_lower_codes = this.target_lower_codes,
+			query_len = query_lower_codes.length,
+			target_len = target_lower_codes.length;
+
+		let query_i = 0,
+			target_i = 0,
+			typo_simple_i = 0,
+			matches_simple_len = 0;
+		let query_lower_code = query_lower_codes[0];
+
+		while (true) {
+			let is_match = query_lower_code === target_lower_codes[target_i];
+			if (is_match) {
+				this.matches_simple[matches_simple_len++] = target_i;
+				++query_i;
+				if (query_i === query_len) break;
+				query_lower_code =
+					query_lower_codes[
+						!typo_simple_i ? query_i : typo_simple_i === query_i ? query_i - 1 : query_i
 					];
 			}
 
-			++targetI;
-			if (targetI >= targetLen) {
-				for (;;) {
-					if (searchI <= 1) return null;
-					if (typoSimpleI === 0) {
-						--searchI;
-						var searchLowerCodeNew = searchLowerCodes[searchI];
-						if (searchLowerCode === searchLowerCodeNew) continue;
-						typoSimpleI = searchI;
+			++target_i;
+			if (target_i >= target_len) {
+				while (true) {
+					if (query_i <= 1) return 0;
+					let query_lower_code_new;
+					if (!typo_simple_i) {
+						--query_i;
+						query_lower_code_new = query_lower_codes[query_i];
+						if (query_lower_code === query_lower_code_new) continue;
+						typo_simple_i = query_i;
 					} else {
-						if (typoSimpleI === 1) return null;
-						--typoSimpleI;
-						searchI = typoSimpleI;
-						searchLowerCode = searchLowerCodes[searchI + 1];
-						var searchLowerCodeNew = searchLowerCodes[searchI];
-						if (searchLowerCode === searchLowerCodeNew) continue;
+						if (typo_simple_i === 1) return 0;
+						--typo_simple_i;
+						query_i = typo_simple_i;
+						query_lower_code = query_lower_codes[query_i + 1];
+						query_lower_code_new = query_lower_codes[query_i];
+						if (query_lower_code === query_lower_code_new) continue;
 					}
-					matchesSimpleLen = searchI;
-					targetI = matchesSimple[matchesSimpleLen - 1] + 1;
+
+					matches_simple_len = query_i;
+					target_i = this.matches_simple[matches_simple_len - 1] + 1;
 					break;
 				}
 			}
 		}
 
-		var searchI = 0;
-		var typoStrictI = 0;
-		var successStrict = false;
-		var matchesStrictLen = 0;
+		query_i = 0;
+		let typo_strict_i = 0,
+			matches_strict_len = 0,
+			success_strict = false;
+		const next_beginning_indexes = this.next_beginning_indexes;
 
-		var nextBeginningIndexes = prepared._nextBeginningIndexes;
-		if (nextBeginningIndexes === null)
-			nextBeginningIndexes = prepared._nextBeginningIndexes = fuzzy.prepareNextBeginningIndexes(
-				prepared.target
-			);
-		var firstPossibleI = (targetI =
-			matchesSimple[0] === 0 ? 0 : nextBeginningIndexes[matchesSimple[0] - 1]);
+		const first_possible_i =
+			this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
+		target_i = first_possible_i;
 
-		if (targetI !== targetLen)
-			for (;;) {
-				if (targetI >= targetLen) {
-					if (searchI <= 0) {
-						++typoStrictI;
-						if (typoStrictI > searchLen - 2) break;
-						if (searchLowerCodes[typoStrictI] === searchLowerCodes[typoStrictI + 1]) continue;
-						targetI = firstPossibleI;
+		if (target_i !== target_len)
+			while (true) {
+				if (target_i >= target_len) {
+					if (query_i <= 0) {
+						++typo_strict_i;
+						if (typo_strict_i > query_len - 2) break;
+						if (query_lower_codes[typo_strict_i] === query_lower_codes[typo_strict_i + 1]) continue;
+						target_i = first_possible_i;
 						continue;
 					}
 
-					--searchI;
-					var lastMatch = matchesStrict[--matchesStrictLen];
-					targetI = nextBeginningIndexes[lastMatch];
+					--query_i;
+					let last_match = this.matches_strict[--matches_strict_len];
+					target_i = next_beginning_indexes[last_match];
 				} else {
-					var isMatch =
-						searchLowerCodes[
-							typoStrictI === 0
-								? searchI
-								: typoStrictI === searchI
-								? searchI + 1
-								: typoStrictI === searchI - 1
-								? searchI - 1
-								: searchI
-						] === targetLowerCodes[targetI];
-					if (isMatch) {
-						matchesStrict[matchesStrictLen++] = targetI;
-						++searchI;
-						if (searchI === searchLen) {
-							successStrict = true;
+					let is_match =
+						query_lower_codes[
+							!typo_strict_i
+								? query_i
+								: typo_strict_i === query_i
+								? query_i + 1
+								: typo_strict_i === query_i - 1
+								? query_i - 1
+								: query_i
+						] === target_lower_codes[target_i];
+
+					if (is_match) {
+						this.matches_strict[matches_strict_len++] = target_i;
+						++query_i;
+						if (query_i === query_len) {
+							success_strict = true;
 							break;
 						}
-						++targetI;
+						++target_i;
 					} else {
-						targetI = nextBeginningIndexes[targetI];
+						target_i = next_beginning_indexes[target_i];
 					}
 				}
+				// if (target_i === undefined) break;
 			}
 
 		{
-			if (successStrict) {
-				var matchesBest = matchesStrict;
-				var matchesBestLen = matchesStrictLen;
-			} else {
-				var matchesBest = matchesSimple;
-				var matchesBestLen = matchesSimpleLen;
+			const matches_best = success_strict ? this.matches_strict : this.matches_simple;
+
+			let score = 0,
+				last_target_i = -1;
+			for (let i = 0; i < query_len; ++i) {
+				target_i = matches_best[i];
+				if (last_target_i !== target_i - 1) score -= target_i;
+				last_target_i = target_i;
 			}
-			var score = 0;
-			var lastTargetI = -1;
-			for (var i = 0; i < searchLen; ++i) {
-				var targetI = matchesBest[i];
-				if (lastTargetI !== targetI - 1) score -= targetI;
-				lastTargetI = targetI;
-			}
-			if (!successStrict) {
+
+			if (!success_strict) {
 				score *= 1000;
-				if (typoSimpleI !== 0) score += -20;
+				if (typo_simple_i) score -= 20;
 			} else {
-				if (typoStrictI !== 0) score += -20;
+				if (typo_strict_i) score -= 20;
 			}
-			score -= targetLen - searchLen;
-			prepared.score = score;
-			prepared.indexes = new Array(matchesBestLen);
-			for (var i = matchesBestLen - 1; i >= 0; --i) prepared.indexes[i] = matchesBest[i];
 
-			return prepared;
+			score -= target_len - query_len;
+			return score;
 		}
-	},
-	algorithmNoTypo: (searchLowerCodes, prepared, searchLowerCode) => {
-		var targetLowerCodes = prepared._targetLowerCodes;
-		var searchLen = searchLowerCodes.length;
-		var targetLen = targetLowerCodes.length;
-		var searchI = 0;
-		var targetI = 0;
-		var matchesSimpleLen = 0;
+	}
 
-		for (;;) {
-			var isMatch = searchLowerCode === targetLowerCodes[targetI];
-			if (isMatch) {
-				matchesSimple[matchesSimpleLen++] = targetI;
-				++searchI;
-				if (searchI === searchLen) break;
-				searchLowerCode = searchLowerCodes[searchI];
+	algorithmPunishTypo(query_lower_codes) {
+		const target_lower_codes = this.target_lower_codes,
+			query_len = query_lower_codes.length,
+			target_len = target_lower_codes.length;
+
+		let query_i = 0,
+			target_i = 0,
+			matches_simple_len = 0,
+			query_lower_code = query_lower_codes[0];
+
+		while (true) {
+			let is_match = query_lower_code === target_lower_codes[target_i];
+			if (is_match) {
+				this.matches_simple[matches_simple_len++] = target_i;
+				++query_i;
+				if (query_i === query_len) break;
+				query_lower_code = query_lower_codes[query_i];
 			}
-			++targetI;
-			if (targetI >= targetLen) return null;
+
+			++target_i;
+			if (target_i >= target_len) return 0;
 		}
 
-		var searchI = 0;
-		var successStrict = false;
-		var matchesStrictLen = 0;
+		query_i = 0;
+		let matches_strict_len = 0,
+			success_strict = false;
+		const next_beginning_indexes = this.next_beginning_indexes;
 
-		var nextBeginningIndexes = prepared._nextBeginningIndexes;
-		if (nextBeginningIndexes === null)
-			nextBeginningIndexes = prepared._nextBeginningIndexes = fuzzy.prepareNextBeginningIndexes(
-				prepared.target
-			);
-		var firstPossibleI = (targetI =
-			matchesSimple[0] === 0 ? 0 : nextBeginningIndexes[matchesSimple[0] - 1]);
+		target_i =
+			this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
 
-		if (targetI !== targetLen)
-			for (;;) {
-				if (targetI >= targetLen) {
-					if (searchI <= 0) break;
+		if (target_i !== target_len)
+			while (true) {
+				if (target_i >= target_len) {
+					if (query_i <= 0) break;
 
-					--searchI;
-					var lastMatch = matchesStrict[--matchesStrictLen];
-					targetI = nextBeginningIndexes[lastMatch];
+					--query_i;
+					let last_match = this.matches_strict[--matches_strict_len];
+					target_i = next_beginning_indexes[last_match];
 				} else {
-					var isMatch = searchLowerCodes[searchI] === targetLowerCodes[targetI];
-					if (isMatch) {
-						matchesStrict[matchesStrictLen++] = targetI;
-						++searchI;
-						if (searchI === searchLen) {
-							successStrict = true;
+					let is_match = query_lower_codes[query_i] === target_lower_codes[target_i];
+
+					if (is_match) {
+						this.matches_strict[matches_strict_len++] = target_i;
+						++query_i;
+						if (query_i === query_len) {
+							success_strict = true;
 							break;
 						}
-						++targetI;
+						++target_i;
 					} else {
-						targetI = nextBeginningIndexes[targetI];
+						target_i = next_beginning_indexes[target_i];
 					}
 				}
 			}
-
 		{
-			if (successStrict) {
-				var matchesBest = matchesStrict;
-				var matchesBestLen = matchesStrictLen;
-			} else {
-				var matchesBest = matchesSimple;
-				var matchesBestLen = matchesSimpleLen;
-			}
-			var score = 0;
-			var lastTargetI = -1;
-			for (var i = 0; i < searchLen; ++i) {
-				var targetI = matchesBest[i];
-				if (lastTargetI !== targetI - 1) score -= targetI;
-				lastTargetI = targetI;
-			}
-			if (!successStrict) score *= 1000;
-			score -= targetLen - searchLen;
-			prepared.score = score;
-			prepared.indexes = new Array(matchesBestLen);
-			for (var i = matchesBestLen - 1; i >= 0; --i) prepared.indexes[i] = matchesBest[i];
+			const matches_best = success_strict ? this.matches_strict : this.matches_simple;
 
-			return prepared;
+			let score = 0,
+				last_target_i = -1;
+			for (let i = 0; i < query_len; ++i) {
+				target_i = matches_best[i];
+				if (last_target_i !== target_i - 1) score -= target_i;
+				last_target_i = target_i;
+			}
+
+			if (!success_strict) score *= 1000;
+
+			score -= target_len - query_len;
+			return score;
 		}
-	},
-	prepareLowerCodes: str => {
-		var strLen = str.length;
-		var lowerCodes = [];
-		var lower = str.toLowerCase();
-		for (var i = 0; i < strLen; ++i) lowerCodes[i] = lower.charCodeAt(i);
-		return lowerCodes;
-	},
-	prepareBeginningIndexes: target => {
-		var targetLen = target.length;
-		var beginningIndexes = [];
-		var beginningIndexesLen = 0;
-		var wasUpper = false;
-		var wasAlphanum = false;
-		for (var i = 0; i < targetLen; ++i) {
-			var targetCode = target.charCodeAt(i);
-			var isUpper = targetCode >= 65 && targetCode <= 90;
-			var isAlphanum =
-				isUpper ||
-				(targetCode >= 97 && targetCode <= 122) ||
-				(targetCode >= 48 && targetCode <= 57);
-			var isBeginning = (isUpper && !wasUpper) || !wasAlphanum || !isAlphanum;
-			wasUpper = isUpper;
-			wasAlphanum = isAlphanum;
-			if (isBeginning) beginningIndexes[beginningIndexesLen++] = i;
+	}
+
+	static getPreparedQuery(query) {
+		if (query.length > 999) return this.prepareLowerCodes(query);
+		let query_prepared = this.prepared_query_cache.get(query);
+		if (query_prepared !== undefined) return query_prepared;
+		query_prepared = this.prepareLowerCodes(query);
+		this.prepared_query_cache.set(query, query_prepared);
+		return query_prepared;
+	}
+
+	set target(target) {
+		this._target = target;
+		this.target_len = target.length;
+
+		this.target_lower_codes = Fuzzy.prepareLowerCodes(target);
+		this.next_beginning_indexes = this.prepareNextBeginningIndexes(target);
+	}
+
+	static prepareLowerCodes(str) {
+		const str_len = str.length,
+			lower_codes = [],
+			lower = str.toLowerCase();
+		for (let i = 0; i < str_len; i++) {
+			lower_codes[i] = lower.charCodeAt(i);
 		}
-		return beginningIndexes;
-	},
-	prepareNextBeginningIndexes: target => {
-		var targetLen = target.length;
-		var beginningIndexes = fuzzy.prepareBeginningIndexes(target);
-		var nextBeginningIndexes = [];
-		var lastIsBeginning = beginningIndexes[0];
-		var lastIsBeginningI = 0;
-		for (var i = 0; i < targetLen; ++i) {
-			if (lastIsBeginning > i) {
-				nextBeginningIndexes[i] = lastIsBeginning;
+		return lower_codes;
+	}
+
+	prepareBeginningIndexes() {
+		const beginning_indexes = [];
+
+		let beginning_indexes_len = 0,
+			was_upper = false,
+			was_alpha_num = false;
+
+		for (let i = 0; i < this.target_len; i++) {
+			let target_code = this._target.charCodeAt(i),
+				is_upper = target_code >= 65 && target_code <= 90,
+				is_alpha_num =
+					is_upper ||
+					(target_code >= 97 && target_code <= 122) ||
+					(target_code >= 48 && target_code <= 57),
+				is_beginning = (is_upper && !was_upper) || !was_alpha_num || !is_alpha_num;
+
+			was_upper = is_upper;
+			was_alpha_num = is_alpha_num;
+			if (is_beginning) beginning_indexes[beginning_indexes_len++] = i;
+		}
+		return beginning_indexes;
+	}
+
+	prepareNextBeginningIndexes() {
+		const beginning_indexes = this.prepareBeginningIndexes(),
+			next_beginning_indexes = [];
+
+		let last_is_beginning = beginning_indexes[0],
+			last_is_beginning_i = 0;
+
+		for (let i = 0; i < this.target_len; i++) {
+			if (last_is_beginning > i) {
+				next_beginning_indexes[i] = last_is_beginning;
 			} else {
-				lastIsBeginning = beginningIndexes[++lastIsBeginningI];
-				nextBeginningIndexes[i] = lastIsBeginning === undefined ? targetLen : lastIsBeginning;
+				last_is_beginning = beginning_indexes[++last_is_beginning_i];
+				next_beginning_indexes[i] = last_is_beginning ?? this.target_len;
 			}
 		}
-		return nextBeginningIndexes;
-	},
-	cleanup: () => {
-		preparedCache.clear();
-		preparedSearchCache.clear();
-		matchesSimple = [];
-		matchesStrict = [];
-	},
-};
+		return next_beginning_indexes;
+	}
+
+	cleanup() {
+		this.matches_simple.length = this.matches_strict.length = 0;
+	}
+
+	static clear() {
+		this.prepared_query_cache.clear();
+	}
+
+	run(allow_typo = true) {
+		for (const query of this.queries) {
+			const score = allow_typo ? this.algorithm(query) : this.algorithmPunishTypo(query);
+			this.scores.push(score);
+		}
+		this.cleanup();
+		return this;
+	}
+}
 
 /*
  COMMANDS OBJECT
@@ -640,8 +707,7 @@ const COMMANDS = {
 	},
 };
 
-// freeze objects as precautionary sec measure
-Object.freeze(FUZZY);
+// freeze COMMANDS for ensured sec at runtime
 Object.freeze(COMMANDS);
 
 /*

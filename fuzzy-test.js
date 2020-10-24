@@ -154,7 +154,7 @@ class Fuzzy extends Analyzer {
 						++typo_strict_i;
 						if (typo_strict_i > query_len - 2) break;
 						if (query_lower_codes[typo_strict_i] === query_lower_codes[typo_strict_i + 1]) continue;
-						query_i = first_possible_i;
+						target_i = first_possible_i;
 						continue;
 					}
 
@@ -185,7 +185,7 @@ class Fuzzy extends Analyzer {
 						target_i = next_beginning_indexes[target_i];
 					}
 				}
-				if (target_i === undefined) break;
+				// if (target_i === undefined) break;
 			}
 
 		{
