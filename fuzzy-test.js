@@ -68,9 +68,8 @@ class Analyzer {
 			'range',
 			'std_deviation',
 			'match_std_deviation',
-		]) {
+		])
 			stats[attr] = this[attr];
-		}
 
 		return stats;
 	}
@@ -106,9 +105,7 @@ class Fuzzy extends Analyzer {
 				++query_i;
 				if (query_i === query_len) break;
 				query_lower_code =
-					query_lower_codes[
-						!typo_simple_i ? query_i : typo_simple_i === query_i ? query_i - 1 : query_i
-					];
+					query_lower_codes[!typo_simple_i ? query_i : typo_simple_i === query_i ? query_i - 1 : query_i];
 			}
 
 			++target_i;
@@ -143,8 +140,7 @@ class Fuzzy extends Analyzer {
 			success_strict = false;
 		const next_beginning_indexes = this.next_beginning_indexes;
 
-		const first_possible_i =
-			this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
+		const first_possible_i = this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
 		target_i = first_possible_i;
 
 		if (target_i !== target_len)
@@ -185,7 +181,6 @@ class Fuzzy extends Analyzer {
 						target_i = next_beginning_indexes[target_i];
 					}
 				}
-				// if (target_i === undefined) break;
 			}
 
 		{
@@ -239,8 +234,7 @@ class Fuzzy extends Analyzer {
 			success_strict = false;
 		const next_beginning_indexes = this.next_beginning_indexes;
 
-		target_i =
-			this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
+		target_i = this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
 
 		if (target_i !== target_len)
 			while (true) {
@@ -322,9 +316,7 @@ class Fuzzy extends Analyzer {
 			let target_code = this._target.charCodeAt(i),
 				is_upper = target_code >= 65 && target_code <= 90,
 				is_alpha_num =
-					is_upper ||
-					(target_code >= 97 && target_code <= 122) ||
-					(target_code >= 48 && target_code <= 57),
+					is_upper || (target_code >= 97 && target_code <= 122) || (target_code >= 48 && target_code <= 57),
 				is_beginning = (is_upper && !was_upper) || !was_alpha_num || !is_alpha_num;
 
 			was_upper = is_upper;

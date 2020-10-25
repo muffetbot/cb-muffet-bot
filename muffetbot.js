@@ -42,7 +42,8 @@ let filter_privileged = false, // variable set to cb.settings.filter_privileged 
 	/*
 	fuzzy_filters template object:
 	{
-
+		trigger_words: 'how old are you',	// separated by whitespace
+		fuzzy_prompt: '{{me}} is 79 years old!',	// message to send user if their message passes fuzz analysis - {{me}} will be replaced with model name
 	}
 */
 	fuzzy_filters = []; // possible triggers for fuzzyfinding FAQ's
@@ -50,11 +51,12 @@ let filter_privileged = false, // variable set to cb.settings.filter_privileged 
 /*
  APP SETTINGS TO REQUEST ON INIT
  available at runtime as attributes in cb.settings object
+ name value sets key in cb.settings object
 */
 cb.settings_choices = [
 	{
 		name: 'leave_msg',
-		default: 'FUCK OFF!!!',
+		defaultValue: 'FUCK OFF!!!',
 		type: 'str',
 		label: 'This message will display when the stream ends',
 		required: false,
@@ -62,13 +64,33 @@ cb.settings_choices = [
 	{
 		name: 'filter_privileged',
 		type: 'str',
-		label: 'Write `yes` or `true` if app should also silence filters from mods/owner',
+		label: 'Write `yes` or `true` if the app should also silence filters from mods/owner',
 		required: false,
 	},
 	{
-		name: 'filters', // name value sets key in cb.settings object
+		name: 'filters',
 		type: 'str',
 		label: 'Terms for the app to silence, separated by commas',
+		required: false,
+	},
+	{
+		name: 'faq0',
+		type: 'str',
+		label: `FAQ for the app to answer, followed by trigger words for this FAQ.
+		Please separate with a double semicolon. {{me}} will be replaced with your username.
+		example: {{me}} is 79 years old!;;how old are you`,
+		required: false,
+	},
+	{
+		name: 'faq1',
+		type: 'str',
+		label: `FAQ for the app to answer, followed by trigger words for this FAQ.`,
+		required: false,
+	},
+	{
+		name: 'faq2',
+		type: 'str',
+		label: `FAQ for the app to answer, followed by trigger words for this FAQ.`,
 		required: false,
 	},
 ];
@@ -76,13 +98,11 @@ cb.settings_choices = [
 /*
  FUNCTION DECLARATIONS
 */
-
-// faster as a function
-const isObj = x => typeof x === 'object';
+const isString = str => typeof str === 'string';
 
 // returns true if `str` incidences of whitespace exceed MAX_WHITE_SPACE
 const max_whitespace_exceeded = str => {
-	for (let i = (count = 0); i < str.length; count += +(' ' === str[i++])) {
+	for (let i = 0, count = 0; i < str.length; count += +(' ' === str[i++])) {
 		if (count > MAX_WHITE_SPACE) return true;
 	}
 	return false;
@@ -219,7 +239,9 @@ const filterMsg = msg => {
  plot method for testing, preferrably with console.table()
 */
 class Analyzer {
-	scores = [];
+	constructor() {
+		this.scores = [];
+	}
 
 	static avg(arr) {
 		return arr.reduce((a, c) => (a += c)) / arr.length;
@@ -242,8 +264,8 @@ class Analyzer {
 	}
 
 	get min_max() {
-		const pos = this.match_scores;
-		return [Math.min(...pos), Math.max(...pos)];
+		const matched = this.match_scores;
+		return [Math.min(...matched), Math.max(...matched)];
 	}
 
 	get range() {
@@ -288,9 +310,8 @@ class Analyzer {
 			'range',
 			'std_deviation',
 			'match_std_deviation',
-		]) {
+		])
 			stats[attr] = this[attr];
-		}
 
 		return stats;
 	}
@@ -305,12 +326,11 @@ class Analyzer {
  TODO: maybe use WeakMap instead of Map for cache
 */
 class Fuzzy extends Analyzer {
-	static prepared_query_cache = new Map();
-	matches_simple = [];
-	matches_strict = [];
-
 	constructor(target, ...queries) {
 		super();
+		Reflect.set(Fuzzy, 'prepared_query_cache', new Map());
+		this.matches_simple = [];
+		this.matches_strict = [];
 		this.target = target;
 		this.queries = [...queries].map(q => Fuzzy.getPreparedQuery(q));
 		return this;
@@ -324,8 +344,8 @@ class Fuzzy extends Analyzer {
 		let query_i = 0,
 			target_i = 0,
 			typo_simple_i = 0,
-			matches_simple_len = 0;
-		let query_lower_code = query_lower_codes[0];
+			matches_simple_len = 0,
+			query_lower_code = query_lower_codes[0];
 
 		while (true) {
 			let is_match = query_lower_code === target_lower_codes[target_i];
@@ -334,9 +354,7 @@ class Fuzzy extends Analyzer {
 				++query_i;
 				if (query_i === query_len) break;
 				query_lower_code =
-					query_lower_codes[
-						!typo_simple_i ? query_i : typo_simple_i === query_i ? query_i - 1 : query_i
-					];
+					query_lower_codes[!typo_simple_i ? query_i : typo_simple_i === query_i ? query_i - 1 : query_i];
 			}
 
 			++target_i;
@@ -371,8 +389,7 @@ class Fuzzy extends Analyzer {
 			success_strict = false;
 		const next_beginning_indexes = this.next_beginning_indexes;
 
-		const first_possible_i =
-			this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
+		const first_possible_i = this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
 		target_i = first_possible_i;
 
 		if (target_i !== target_len)
@@ -413,7 +430,6 @@ class Fuzzy extends Analyzer {
 						target_i = next_beginning_indexes[target_i];
 					}
 				}
-				// if (target_i === undefined) break;
 			}
 
 		{
@@ -467,8 +483,7 @@ class Fuzzy extends Analyzer {
 			success_strict = false;
 		const next_beginning_indexes = this.next_beginning_indexes;
 
-		target_i =
-			this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
+		target_i = this.matches_simple[0] === 0 ? 0 : next_beginning_indexes[this.matches_simple[0] - 1];
 
 		if (target_i !== target_len)
 			while (true) {
@@ -550,9 +565,7 @@ class Fuzzy extends Analyzer {
 			let target_code = this._target.charCodeAt(i),
 				is_upper = target_code >= 65 && target_code <= 90,
 				is_alpha_num =
-					is_upper ||
-					(target_code >= 97 && target_code <= 122) ||
-					(target_code >= 48 && target_code <= 57),
+					is_upper || (target_code >= 97 && target_code <= 122) || (target_code >= 48 && target_code <= 57),
 				is_beginning = (is_upper && !was_upper) || !was_alpha_num || !is_alpha_num;
 
 			was_upper = is_upper;
@@ -574,7 +587,7 @@ class Fuzzy extends Analyzer {
 				next_beginning_indexes[i] = last_is_beginning;
 			} else {
 				last_is_beginning = beginning_indexes[++last_is_beginning_i];
-				next_beginning_indexes[i] = last_is_beginning ?? this.target_len;
+				next_beginning_indexes[i] = last_is_beginning === undefined ? last_is_beginning : this.target_len;
 			}
 		}
 		return next_beginning_indexes;
@@ -601,11 +614,13 @@ class Fuzzy extends Analyzer {
 /*
  COMMANDS OBJECT
  `fn` inner object acts as callback
+ `help` will be displayed for this command in !help command
  `restricted` inner attr hides command from non mod/owner users if set to true
 */
 const COMMANDS = {
 	'!filters': {
 		fn: _ => word_filters.join(', '),
+		help: 'See a list of the terms being hidden from chat',
 		restricted: false,
 	},
 	'!addfilters': {
@@ -624,14 +639,12 @@ const COMMANDS = {
 			if (res.added.length) msgPrivileged(`${res.added.join(', ')} added to the filter list`);
 
 			if (res.lorge.length)
-				warn(
-					`${res.lorge.join(', ')} were too long to add, try splitting into smaller phrases`,
-					user
-				);
+				warn(`${res.lorge.join(', ')} were too long to add, try splitting into smaller phrases`, user);
 
-			if (res.redundant.length)
-				warn(`${res.redundant.join(', ')} are already in the filter list`, user);
+			if (res.redundant.length) warn(`${res.redundant.join(', ')} are already in the filter list`, user);
 		},
+		help:
+			'Add terms/phrases to be hidden from chat, separated by a comma. i.e. !addfilters mullet, simp, slay queen',
 		restricted: true,
 	},
 	'!addfilter': {
@@ -650,14 +663,20 @@ const COMMANDS = {
 					warn(`${term} was not added because it already exists`, user);
 			}
 		},
+		help: 'Add a single term/phrase to be hidden from chat. i.e. !addfilter moist towel',
 		restricted: true,
 	},
 	'!lemon': {
-		fn: _ => {
+		fn: obj => {
 			const fllw =
-				'FOLLOW!!! SUBSCRIBE ON YOUTUBE!! FOLLOW ON TWITTER AND JOIN THE PATERON!! JOIN THE DISCORD!! STEELCUTKAWAII.COM';
-			shout(fllw);
+				'FOLLOW!!! SUBSCRIBE ON YOUTUBE!! FOLLOW ON TWITTER AND JOIN THE PATREON!! JOIN THE DISCORD!! STEELCUTKAWAII.COM';
+			const user = obj.user.toLowerCase();
+			const qualified = user === 'lemon_ways' || user === 'xx_spidder_xx';
+
+			if (qualified) shout(fllw);
+			else warn('bad boy', obj.user);
 		},
+		help: 'If you are not lemon and you use this command, you will be punished.',
 		restricted: false,
 	},
 	'!rmfilters': {
@@ -673,12 +692,11 @@ const COMMANDS = {
 			let done = deferredRm(res);
 			while (!done) done = deferredRm(res);
 
-			if (res.removed.length)
-				msgPrivileged(`${res.removed.join(', ')} removed from the filter list`);
+			if (res.removed.length) msgPrivileged(`${res.removed.join(', ')} removed from the filter list`);
 
-			if (res.not_found.length)
-				warn(`${res.not_found.join(', ')} were not found in the filter list`, user);
+			if (res.not_found.length) warn(`${res.not_found.join(', ')} were not found in the filter list`, user);
 		},
+		help: 'Remove chat filters a few at a time, separated by a comma. i.e. !rmfilters mullet, simp, slay queen',
 		restricted: true,
 	},
 	'!rmfilter': {
@@ -686,23 +704,39 @@ const COMMANDS = {
 			const [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
 			const term = cmd.replace('!rmfilter', '');
 
-			if (rmFilter(term)) {
-				msgPrivileged(`${term} was removed from the filter list`);
-			} else {
-				warn(`${term} was not found in the filter list`, user);
-			}
+			if (rmFilter(term)) msgPrivileged(`${term} was removed from the filter list`);
+			else warn(`${term} was not found in the filter list`, user);
 		},
+		help: 'Remove a single filter from the filter list. i.e. !rmfilter moist towel',
 		restricted: true,
+	},
+	'!help': {
+		fn: obj => {
+			const cmds = Reflect.ownKeys(COMMANDS);
+			let help_str = '';
+
+			for (const cmd of cmds) {
+				const c = COMMANDS[cmd];
+				if (c.restricted) {
+					if (hasPrivileges(obj.user)) help_str += `${cmd}: ${c.help}\n`;
+				} else {
+					help_str += `${cmd}: ${c.help}\n`;
+				}
+			}
+
+			return help_str;
+		},
+		help: 'Print this help text in chat.',
+		restricted: false,
 	},
 	'!commands': {
 		fn: obj => {
 			const cmds = Reflect.ownKeys(COMMANDS);
-			if (hasPrivileges(obj.user)) {
-				return cmds.join(', ');
-			}
 
+			if (hasPrivileges(obj.user)) return cmds.join(', ');
 			return cmds.filter(cmd => !COMMANDS[cmd].restricted).join(', ');
 		},
+		help: 'List all available commands.',
 		restricted: false,
 	},
 };
@@ -753,7 +787,7 @@ cb.onMessage(msg => {
 			if (c.restricted && !hasPrivileges(msg.user)) break;
 
 			const res = c.fn(msg);
-			if (typeof res === 'string') success(res, msg.user);
+			if (isString(res)) success(res, msg.user);
 			msg.m = '';
 			break;
 		}
