@@ -10,7 +10,7 @@ class Analyzer {
 	}
 
 	get match_ratio() {
-		return this.match_scores.length / this.scores.length;
+		return this.scores.filter(s => s && s > -2000).length / this.scores.length;
 	}
 
 	get mean() {
@@ -361,12 +361,24 @@ class Fuzzy extends Analyzer {
 	}
 }
 
-const TEST_MSG = 'Hi first time in your how room miss muffet, are you new? old are you?';
-const FUZZY_ARGS = 'how firts muffet giraffe lights'.split(' ');
+const FUZZ_CHECK_LIM = 120, // past this message length, the fuzzer will not analyze the message
+	FUZZ_MAX_RANGE = 150, // lower is more discriminant
+	FUZZ_MIN_RATIO = 0.85; // higher is more discriminant (0 to 1)
+
+const TEST_MSG =
+	'Hi first time in your room miss muffet, are you new? HOW OLD ARE YOU? lol we placed third. You are so mirthy and hilarious';
+const FUZZY_ARGS = 'how old are you'.split(' ');
+
+// fuzzy validator
+function fuzzMatch(fuzzy) {
+	if (fuzzy.match_ratio < FUZZ_MIN_RATIO || fuzzy.range > FUZZ_MAX_RANGE) return false;
+	return true;
+}
 
 function test() {
-	const fuzz = new Fuzzy(TEST_MSG, ...FUZZY_ARGS);
-	return fuzz.run().plot();
+	const fuzz = new Fuzzy(TEST_MSG, ...FUZZY_ARGS).run();
+	console.log(fuzzMatch(fuzz));
+	return fuzz.plot();
 }
 
 const results = test();

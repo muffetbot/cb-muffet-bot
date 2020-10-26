@@ -28,25 +28,24 @@ SOFTWARE.
 /*
  GLOBAL CONSTANTS/SETTINGS
 */
-const CHECK_LIM = 100, // number of filters to check for duplicates on insertion, lower is faster
-	MAX_FILTER_LEN = 150, // upper bound for acceptable filter string length, lower is faster
-	MAX_WHITE_SPACE = 7, // limit for allowed number of whitespace in filters, lower is faster
-	OWNER = cb.room_slug, // room owner name
+const OWNER = cb.room_slug, // room owner name
+	ME = '{{me}}',
+	FUZZ_CHECK_LIM = 120, // past this message length, the fuzzer will not analyze the message
+	FUZZ_MAX_RANGE = 150, // lower is more discriminant
+	FUZZ_MIN_RATIO = 0.85, // higher is more discriminant (0 to 1)
 	[GREEN, RED] = ['#008000', '#FF0000'];
 
 /*
  GLOBAL VARIABLES
 */
-let filter_privileged = false, // variable set to cb.settings.filter_privileged on app start
-	word_filters = [], // terms to hide from chat
-	/*
-	fuzzy_filters template object:
+/*
+	fuzzy_filters template hash:
 	{
-		trigger_words: 'how old are you',	// separated by whitespace
-		fuzzy_prompt: '{{me}} is 79 years old!',	// message to send user if their message passes fuzz analysis - {{me}} will be replaced with model name
+		key: '{{me}} is 79 years old!',	// message to send user if their message passes fuzz analysis - {{me}} will be replaced with model name
+		value: ['how', 'old', 'are', 'you'],	// split by whitespace
 	}
 */
-	fuzzy_filters = []; // possible triggers for fuzzyfinding FAQ's
+let fuzzy_filters = new Map();
 
 /*
  APP SETTINGS TO REQUEST ON INIT
@@ -59,18 +58,6 @@ cb.settings_choices = [
 		defaultValue: 'FUCK OFF!!!',
 		type: 'str',
 		label: 'This message will display when the stream ends',
-		required: false,
-	},
-	{
-		name: 'filter_privileged',
-		type: 'str',
-		label: 'Write `yes` or `true` if the app should also silence filters from mods/owner',
-		required: false,
-	},
-	{
-		name: 'filters',
-		type: 'str',
-		label: 'Terms for the app to silence, separated by commas',
 		required: false,
 	},
 	{
@@ -98,15 +85,8 @@ cb.settings_choices = [
 /*
  FUNCTION DECLARATIONS
 */
+// faster as a function
 const isString = str => typeof str === 'string';
-
-// returns true if `str` incidences of whitespace exceed MAX_WHITE_SPACE
-const max_whitespace_exceeded = str => {
-	for (let i = 0, count = 0; i < str.length; count += +(' ' === str[i++])) {
-		if (count > MAX_WHITE_SPACE) return true;
-	}
-	return false;
-};
 
 // shorthands for room notices
 const success = (msg, user) => cb.sendNotice(msg, user, '', GREEN); // send green notice to user only
@@ -133,107 +113,6 @@ const hasPrivileges = user => privileged().includes(user);
 // sends notice to all mods/owners
 const msgPrivileged = msg => privileged().forEach(p => success(msg, p));
 
-// optimized for adding a single filter
-const addFilter = term => {
-	term = term.trim();
-
-	if (term.length > MAX_FILTER_LEN || max_whitespace_exceeded(term)) {
-		return;
-	}
-
-	if (word_filters.length < CHECK_LIM && word_filters.includes(term)) return false;
-
-	word_filters.push(term);
-	word_filters = [...new Set(word_filters)];
-	return true;
-};
-
-/*
-	optimized for adding filters as a batch
-
-	template `addObj` object:
-	{
-		to_add: [...array of filters to attempt add],
-		added: [],
-		lorge: [],
-		redundant: [],
-	}
-
-	modeled to work like a generator function. i.e. :
-	let done = deferredAdd(obj);
-	while(!done) done = deferredAdd(obj);
-*/
-const deferredAdd = addObj => {
-	if (!addObj.to_add.length) {
-		word_filters = [...new Set(word_filters.concat(addObj.added))];
-		return true;
-	}
-	const next = addObj.to_add.pop().trim();
-
-	if (next.length > MAX_FILTER_LEN || max_whitespace_exceeded(next)) {
-		addObj.lorge.push(next);
-	} else if (word_filters.length < CHECK_LIM && word_filters.includes(next)) {
-		addObj.redundant.push(next);
-	} else {
-		addObj.added.push(next);
-	}
-	return false;
-};
-
-// optimized for removing a single filter
-const rmFilter = term => {
-	term = term.trim();
-	if (word_filters.includes(term)) {
-		word_filters = word_filters.filter(w => w !== term);
-		return true;
-	}
-	return false;
-};
-
-/*
-	optimized for removing filters as a batch
-
-	template `rmObj` object:
-	{
-		to_remove: [...array of filters to attempt removal],
-		removed: [],
-		not_found: [],
-	}
-
-	modeled to work like a generator function. i.e. :
-	let done = deferredRm(obj);
-	while(!done) done = deferredRm(obj);
-*/
-const deferredRm = rmObj => {
-	if (!rmObj.to_remove.length) {
-		word_filters = word_filters.filter(w => !rmObj.removed.includes(w));
-		return true;
-	}
-	const next = rmObj.to_remove.pop().trim();
-	if (word_filters.includes(next)) {
-		rmObj.removed.push(next);
-	} else {
-		rmObj.not_found.push(next);
-	}
-	return false;
-};
-
-// censor filter
-// obeys cb.setting.filter_privileged
-const filterMsg = msg => {
-	if (!filter_privileged && hasPrivileges(msg.user)) return;
-
-	const msgText = msg.m.toLowerCase();
-	for (const f of word_filters) {
-		if (msgText.includes(f)) {
-			msg['X-Spam'] = true;
-
-			warn('your message contains a filtered word and was hidden from chat', msg.user);
-			break;
-		}
-	}
-};
-
 /*
  provides getters for statistical analysis for fuzzy matching
  plot method for testing, preferrably with console.table()
@@ -252,7 +131,7 @@ class Analyzer {
 	}
 
 	get match_ratio() {
-		return this.match_scores.length / this.scores.length;
+		return this.scores.filter(s => s && s > -2000).length / this.scores.length;
 	}
 
 	get mean() {
@@ -328,7 +207,6 @@ class Analyzer {
 class Fuzzy extends Analyzer {
 	constructor(target, ...queries) {
 		super();
-		Reflect.set(Fuzzy, 'prepared_query_cache', new Map());
 		this.matches_simple = [];
 		this.matches_strict = [];
 		this.target = target;
@@ -611,6 +489,9 @@ class Fuzzy extends Analyzer {
 	}
 }
 
+// bypass cb parser error
+Reflect.set(Fuzzy, 'prepared_query_cache', new Map());
+
 /*
  COMMANDS OBJECT
  `fn` inner object acts as callback
@@ -618,52 +499,92 @@ class Fuzzy extends Analyzer {
  `restricted` inner attr hides command from non mod/owner users if set to true
 */
 const COMMANDS = {
-	'!filters': {
-		fn: _ => word_filters.join(', '),
-		help: 'See a list of the terms being hidden from chat',
-		restricted: false,
-	},
-	'!addfilters': {
+	'!addfaqs': {
 		fn: obj => {
-			const [cmds, user] = [obj.m.replace('!addfilters', '').toLowerCase(), obj.user];
+			const user = obj.user;
+			let [prompt, triggers] = obj.m.split(';;');
+			triggers = [
+				...new Set(
+					...triggers
+						.toLowerCase()
+						.split(' ')
+						.map(t => t.trim())
+				),
+			];
 
-			const res = {
-				to_add: cmds.split(','),
-				added: [],
-				lorge: [],
-				redundant: [],
-			};
-			let done = deferredAdd(res);
-			while (!done) done = deferredAdd(res);
+			if (!fuzzy_filters.has(prompt)) {
+				fuzzy_filters.set(prompt, triggers);
+				return 'FAQ was added!';
+			}
 
-			if (res.added.length) msgPrivileged(`${res.added.join(', ')} added to the filter list`);
-
-			if (res.lorge.length)
-				warn(`${res.lorge.join(', ')} were too long to add, try splitting into smaller phrases`, user);
-
-			if (res.redundant.length) warn(`${res.redundant.join(', ')} are already in the filter list`, user);
+			warn('FAQ already exists', user);
 		},
-		help:
-			'Add terms/phrases to be hidden from chat, separated by a comma. i.e. !addfilters mullet, simp, slay queen',
+		help: `Add FAQ's many at a time, separated by double colons.
+		example: !addfaqs {{me}} is 79 years old!;;how old are you::{{me}} doesn't do that;;open socks bb`,
 		restricted: true,
 	},
-	'!addfilter': {
+	'!addfaq': {
 		fn: obj => {
-			const [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
-			const term = cmd.replace('!addfilter', '');
+			const user = obj.user,
+				faqs = obj.m.split();
 
-			switch (addFilter(term)) {
-				case true:
-					msgPrivileged(`${term} was added to the filter list`);
-					break;
-				case undefined:
-					warn("it's not recommended to add long phrases, try splitting them up", user);
-					break;
-				default:
-					warn(`${term} was not added because it already exists`, user);
+			let added = 0,
+				failed = [];
+			for (const faq of faqs) {
+				let [prompt, triggers] = faq.split(';;');
+				prompt = prompt.trim();
+
+				if (!fuzzy_filters.has(prompt)) {
+					fuzzy_filters.set(prompt, [
+						...new Set(
+							...triggers
+								.toLowerCase()
+								.split(' ')
+								.map(t => t.trim())
+						),
+					]);
+					++added;
+					continue;
+				}
+				failed.push(prompt);
 			}
+
+			if (!failed.length) {
+				return `${added} FAQ's successfully added!`;
+			}
+
+			warn(`${failed.join('; ')} already exist!`, user);
+			if (added) return `${added} FAQ's added`;
 		},
-		help: 'Add a single term/phrase to be hidden from chat. i.e. !addfilter moist towel',
+		help: `Add FAQ for the app to answer, followed by its trigger words.
+		Please separate with a double semicolon. {{me}} will be replaced with your username.
+		example: !addfaq {{me}} is 79 years old!;;how old are you`,
+		restricted: true,
+	},
+	'!rmfaq': {
+		fn: obj => {
+			const user = obj.user,
+				me_reg = new RegExp(ME, 'g'),
+				faq = obj.m.toLowerCase().replace(me_reg, OWNER);
+
+			const iter = fuzzy_filters.keys();
+			let next = iter.next();
+			while (!next.done) {
+				let f = next.value.toLowerCase();
+				if (f === faq) {
+					fuzzy_filters.delete(next.value);
+					return 'FAQ successfully removed!';
+				} else if (f.contains(ME) && f.replace(me_reg, OWNER) === faq) {
+					fuzzy_filters.delete(next.value);
+					return 'FAQ successfully removed!';
+				}
+				next = iter.next();
+			}
+
+			warn("FAQ was not found! Use !faqs command for a list of active FAQ's", user);
+		},
+		help: `Remove a FAQ if it exists. Use the !faqs command to see active FAQ's.
+		example: !rmfaq {{me}} is 79 years old!`,
 		restricted: true,
 	},
 	'!lemon': {
@@ -679,59 +600,28 @@ const COMMANDS = {
 		help: 'If you are not lemon and you use this command, you will be punished.',
 		restricted: false,
 	},
-	'!rmfilters': {
-		fn: obj => {
-			const [cmds, user] = [obj.m.replace('!rmfilters', '').toLowerCase(), obj.user];
-
-			const res = {
-				to_remove: cmds.split(','),
-				removed: [],
-				not_found: [],
-			};
-
-			let done = deferredRm(res);
-			while (!done) done = deferredRm(res);
-
-			if (res.removed.length) msgPrivileged(`${res.removed.join(', ')} removed from the filter list`);
-
-			if (res.not_found.length) warn(`${res.not_found.join(', ')} were not found in the filter list`, user);
-		},
-		help: 'Remove chat filters a few at a time, separated by a comma. i.e. !rmfilters mullet, simp, slay queen',
-		restricted: true,
-	},
-	'!rmfilter': {
-		fn: obj => {
-			const [cmd, user] = [obj.m.trim().toLowerCase(), obj.user];
-			const term = cmd.replace('!rmfilter', '');
-
-			if (rmFilter(term)) msgPrivileged(`${term} was removed from the filter list`);
-			else warn(`${term} was not found in the filter list`, user);
-		},
-		help: 'Remove a single filter from the filter list. i.e. !rmfilter moist towel',
-		restricted: true,
-	},
 	'!help': {
 		fn: obj => {
 			const cmds = Reflect.ownKeys(COMMANDS);
-			let help_str = '';
+			const help = [];
 
 			for (const cmd of cmds) {
 				const c = COMMANDS[cmd];
 				if (c.restricted) {
-					if (hasPrivileges(obj.user)) help_str += `${cmd}: ${c.help}\n`;
+					if (hasPrivileges(obj.user)) help.push(`${cmd}: ${c.help}`);
 				} else {
-					help_str += `${cmd}: ${c.help}\n`;
+					help.push(`${cmd}: ${c.help}`);
 				}
 			}
 
-			return help_str;
+			return help.sort().join('\n');
 		},
 		help: 'Print this help text in chat.',
 		restricted: false,
 	},
 	'!commands': {
 		fn: obj => {
-			const cmds = Reflect.ownKeys(COMMANDS);
+			const cmds = Reflect.ownKeys(COMMANDS).sort();
 
 			if (hasPrivileges(obj.user)) return cmds.join(', ');
 			return cmds.filter(cmd => !COMMANDS[cmd].restricted).join(', ');
@@ -739,27 +629,65 @@ const COMMANDS = {
 		help: 'List all available commands.',
 		restricted: false,
 	},
+	'!faqs': {
+		fn: _ => {
+			const faqs = [];
+			const iter = fuzzy_filters.keys();
+			let next = iter.next();
+			while (!next.done) {
+				let faq = next.value.replace('{{me}}', OWNER);
+				faqs.push(faq);
+				next = iter.next();
+			}
+
+			return faqs.join('\n');
+		},
+		help: "List of all active FAQ's automatically answered by the bot.",
+		restricted: false,
+	},
 };
 
 // freeze COMMANDS for ensured sec at runtime
 Object.freeze(COMMANDS);
 
+// fuzzy validator
+function fuzzMatch(fuzzy) {
+	if (fuzzy.match_ratio < FUZZ_MIN_RATIO || fuzzy.range > FUZZ_MAX_RANGE) return false;
+	return true;
+}
+
+// fuzzy matcher
+function fuzzIter(msg) {
+	const msg_len = msg.length;
+	if (!msg_len || msg_len > FUZZ_CHECK_LIM) return;
+
+	const iter = fuzzy_filters.entries();
+	let next = iter.next();
+	while (!next.done) {
+		let [key, val] = next.value,
+			fuzz = new Fuzzy(msg, ...val).run();
+
+		if (fuzzMatch(fuzz)) return fuzzy_filters.get(key);
+		next = iter.next();
+	}
+}
+
 /*
  CB CALLBACK FUNCTIONS
 */
 cb.onStart(_ => {
-	const p_setting = cb.settings.filter_privileged.toLowerCase().trim();
-	filter_privileged = p_setting === 'yes' || p_setting === 'true';
+	const faqs = Reflect.ownKeys(cb.settings).filter(k => k.startsWith('faq'));
 
-	const filter_settings = cb.settings.filters;
-	word_filters = [
-		...new Set(
-			filter_settings
+	for (const faq of faqs) {
+		const [prompt, triggers] = faq.split(';;');
+		fuzzy_filters.set(
+			prompt,
+			triggers
 				.toLowerCase()
-				.split(',')
-				.map(f => f.trim())
-		),
-	];
+				.split(' ')
+				.map(t => t.trim())
+		);
+	}
 });
 
 cb.onBroadcastStop(_ => {
@@ -793,6 +721,7 @@ cb.onMessage(msg => {
 		}
 	}
 
-	filterMsg(msg);
+	const fuzzed_faq = fuzzIter(msg.m);
+	if (fuzzed_faq !== undefined) return success(fuzzed_faq, msg.user);
 	return msg;
 });
