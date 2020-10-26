@@ -30,6 +30,7 @@ SOFTWARE.
 */
 const OWNER = cb.room_slug, // room owner name
 	ME = '{{me}}',
+	ME_REGEX = new RegExp(ME, 'g'),
 	FUZZ_CHECK_LIM = 120, // past this message length, the fuzzer will not analyze the message
 	FUZZ_MAX_RANGE = 150, // lower is more discriminant
 	FUZZ_MIN_RATIO = 0.85, // higher is more discriminant (0 to 1)
@@ -564,8 +565,7 @@ const COMMANDS = {
 	'!rmfaq': {
 		fn: obj => {
 			const user = obj.user,
-				me_reg = new RegExp(ME, 'g'),
-				faq = obj.m.toLowerCase().replace(me_reg, OWNER);
+				faq = obj.m.toLowerCase().replace(ME_REGEX, OWNER);
 
 			const iter = fuzzy_filters.keys();
 			let next = iter.next();
@@ -574,7 +574,7 @@ const COMMANDS = {
 				if (f === faq) {
 					fuzzy_filters.delete(next.value);
 					return 'FAQ successfully removed!';
-				} else if (f.contains(ME) && f.replace(me_reg, OWNER) === faq) {
+				} else if (f.contains(ME) && f.replace(ME_REGEX, OWNER) === faq) {
 					fuzzy_filters.delete(next.value);
 					return 'FAQ successfully removed!';
 				}
@@ -667,7 +667,7 @@ function fuzzIter(msg) {
 		let [key, val] = next.value,
 			fuzz = new Fuzzy(msg, ...val).run();
 
-		if (fuzzMatch(fuzz)) return fuzzy_filters.get(key);
+		if (fuzzMatch(fuzz)) return key.replace(ME_REGEX, OWNER);
 		next = iter.next();
 	}
 }
