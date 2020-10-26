@@ -30,15 +30,34 @@ SOFTWARE.
 */
 const OWNER = cb.room_slug, // room owner name
 	ME = '{{me}}',
-	ME_REGEX = new RegExp(ME, 'g'),
-	FUZZ_CHECK_LIM = 120, // past this message length, the fuzzer will not analyze the message
-	FUZZ_MAX_RANGE = 150, // lower is more discriminant
-	FUZZ_MIN_RATIO = 0.85, // higher is more discriminant (0 to 1)
-	[GREEN, RED] = ['#008000', '#FF0000'];
+	ME_REGEX = new RegExp(ME, 'g');
 
 /*
  GLOBAL VARIABLES
 */
+// color options
+const COLORS = {
+	black: '#000000',
+	blue: '#0000FF',
+	green: '#008000',
+	orange: '#FFA500',
+	red: '#FF0000',
+	purple: '#800080',
+	yellow: '#ffff00',
+};
+
+// GLOBAL SETTINGS OBJECT
+const SETTINGS = {
+	colors: {
+		ok: 'green',
+		err: 'red',
+	},
+	fuzz_check_lim: 120, // past this message length, the fuzzer will not analyze the message
+	fuzz_max_range: 150, // lower is more discriminant
+	fuzz_min_ratio: 0.85, // higher is more discriminant (0 to 1)
+	leave_msg: '',
+};
+
 /*
 	fuzzy_filters template hash:
 	{
@@ -54,6 +73,20 @@ let fuzzy_filters = new Map();
  name value sets key in cb.settings object
 */
 cb.settings_choices = [
+	{
+		name: 'ok_color',
+		defaultValue: 'green',
+		label: 'Color for chat notifications.',
+		type: 'choice',
+		choices: Reflect.ownKeys(COLORS),
+	},
+	{
+		name: 'err_color',
+		defaultValue: 'red',
+		label: 'Color for user error notifications',
+		type: 'choice',
+		choices: Reflect.ownKeys(COLORS),
+	},
 	{
 		name: 'leave_msg',
 		defaultValue: 'FUCK OFF!!!',
@@ -81,6 +114,39 @@ cb.settings_choices = [
 		label: `FAQ for the app to answer, followed by trigger words for this FAQ.`,
 		required: false,
 	},
+	{
+		name: 'faq3',
+		type: 'str',
+		label: `FAQ for the app to answer, followed by trigger words for this FAQ.`,
+		required: false,
+	},
+	{
+		name: 'faq4',
+		type: 'str',
+		label: `FAQ for the app to answer, followed by trigger words for this FAQ.`,
+		required: false,
+	},
+	{
+		name: 'fuzz_check_lim',
+		defaultValue: 120,
+		label: 'past this chat message length, the fuzzer will not analyze the message for FAQs',
+		type: 'int',
+		required: false,
+	},
+	{
+		name: 'fuzz_max_range',
+		defaultValue: 150,
+		label: 'lower is more discriminant',
+		type: 'int',
+		required: false,
+	},
+	{
+		name: 'fuzz_min_ratio',
+		defaultValue: 0.85,
+		label: 'higher is more discriminant (value between 0 and 1)',
+		type: 'int',
+		required: false,
+	},
 ];
 
 /*
@@ -90,9 +156,9 @@ cb.settings_choices = [
 const isString = str => typeof str === 'string';
 
 // shorthands for room notices
-const success = (msg, user) => cb.sendNotice(msg, user, '', GREEN); // send green notice to user only
-const warn = (warning, user) => cb.sendNotice(warning, user, '', RED); // send red notice to user only
-const shout = msg => cb.sendNotice(msg, '', '', GREEN); // send green notice to room
+const success = (msg, user) => cb.sendNotice(msg, user, '', SETTINGS.colors.ok); // send green notice to user only
+const warn = (warning, user) => cb.sendNotice(warning, user, '', SETTINGS.colors.err); // send red notice to user only
+const shout = msg => cb.sendNotice(msg, '', '', SETTINGS.colors.ok); // send green notice to room
 
 // returns array of owner + mod names
 const privileged = () => {
@@ -132,7 +198,7 @@ class Analyzer {
 	}
 
 	get match_ratio() {
-		return this.scores.filter(s => s && s > -2000).length / this.scores.length;
+		return this.scores.filter(s => s && s > -1000).length / this.scores.length;
 	}
 
 	get mean() {
@@ -500,34 +566,10 @@ Reflect.set(Fuzzy, 'prepared_query_cache', new Map());
  `restricted` inner attr hides command from non mod/owner users if set to true
 */
 const COMMANDS = {
-	'!addfaqs': {
-		fn: obj => {
-			const user = obj.user;
-			let [prompt, triggers] = obj.m.split(';;');
-			triggers = [
-				...new Set(
-					...triggers
-						.toLowerCase()
-						.split(' ')
-						.map(t => t.trim())
-				),
-			];
-
-			if (!fuzzy_filters.has(prompt)) {
-				fuzzy_filters.set(prompt, triggers);
-				return 'FAQ was added!';
-			}
-
-			warn('FAQ already exists', user);
-		},
-		help: `Add FAQ's many at a time, separated by double colons.
-		example: !addfaqs {{me}} is 79 years old!;;how old are you::{{me}} doesn't do that;;open socks bb`,
-		restricted: true,
-	},
-	'!addfaq': {
+	'!addfaqs ': {
 		fn: obj => {
 			const user = obj.user,
-				faqs = obj.m.split();
+				faqs = obj.m.replace('!addfaqs ', '').split('::');
 
 			let added = 0,
 				failed = [];
@@ -557,15 +599,39 @@ const COMMANDS = {
 			warn(`${failed.join('; ')} already exist!`, user);
 			if (added) return `${added} FAQ's added`;
 		},
+		help: `Add FAQ's many at a time, separated by double colons.
+		example: !addfaqs {{me}} is 79 years old!;;how old are you::{{me}} doesn't do that;;open socks bb`,
+		restricted: true,
+	},
+	'!addfaq ': {
+		fn: obj => {
+			const user = obj.user;
+			let [prompt, triggers] = obj.m.replace('!addfaq ', '').split(';;');
+			triggers = [
+				...new Set(
+					...triggers
+						.toLowerCase()
+						.split(' ')
+						.map(t => t.trim())
+				),
+			];
+
+			if (!fuzzy_filters.has(prompt)) {
+				fuzzy_filters.set(prompt, triggers);
+				return 'FAQ was added!';
+			}
+
+			warn('FAQ already exists', user);
+		},
 		help: `Add FAQ for the app to answer, followed by its trigger words.
 		Please separate with a double semicolon. {{me}} will be replaced with your username.
 		example: !addfaq {{me}} is 79 years old!;;how old are you`,
 		restricted: true,
 	},
-	'!rmfaq': {
+	'!rmfaq ': {
 		fn: obj => {
 			const user = obj.user,
-				faq = obj.m.toLowerCase().replace(ME_REGEX, OWNER);
+				faq = obj.m.replace('!rmfaq ', '').toLowerCase().replace(ME_REGEX, OWNER);
 
 			const iter = fuzzy_filters.keys();
 			let next = iter.next();
@@ -602,7 +668,7 @@ const COMMANDS = {
 	},
 	'!help': {
 		fn: obj => {
-			const cmds = Reflect.ownKeys(COMMANDS);
+			const cmds = Reflect.ownKeys(COMMANDS).sort();
 			const help = [];
 
 			for (const cmd of cmds) {
@@ -614,7 +680,7 @@ const COMMANDS = {
 				}
 			}
 
-			return help.sort().join('\n');
+			return help.join('\n');
 		},
 		help: 'Print this help text in chat.',
 		restricted: false,
@@ -647,19 +713,19 @@ const COMMANDS = {
 	},
 };
 
-// freeze COMMANDS for ensured sec at runtime
 Object.freeze(COMMANDS);
 
 // fuzzy validator
 function fuzzMatch(fuzzy) {
-	if (fuzzy.match_ratio < FUZZ_MIN_RATIO || fuzzy.range > FUZZ_MAX_RANGE) return false;
+	if (fuzzy.match_ratio < SETTINGS.fuzz_min_ratio || fuzzy.range > SETTINGS.fuzz_max_range) return false;
+	// TODO: refine match criteria
 	return true;
 }
 
 // fuzzy matcher
 function fuzzIter(msg) {
 	const msg_len = msg.length;
-	if (!msg_len || msg_len > FUZZ_CHECK_LIM) return;
+	if (!msg_len || msg_len > SETTINGS.fuzz_check_lim) return;
 
 	const iter = fuzzy_filters.entries();
 	let next = iter.next();
@@ -676,9 +742,19 @@ function fuzzIter(msg) {
  CB CALLBACK FUNCTIONS
 */
 cb.onStart(_ => {
-	const faqs = Reflect.ownKeys(cb.settings).filter(k => k.startsWith('faq'));
+	const [ok, err] = [cb.settings.ok_color, cb.settings.err_color];
+	if (ok) SETTINGS.colors.ok = ok;
+	if (err) SETTINGS.colors.err = err;
 
-	for (const faq of faqs) {
+	for (const attr of ['fuzz_check_lim', 'fuzz_max_range', 'fuzz_min_ratio', 'leave_msg'])
+		SETTINGS[attr] = cb.settings[attr];
+
+	const settings = Reflect.ownKeys(cb.settings);
+
+	for (const setting of settings) {
+		if (!setting.startsWith('faq')) continue;
+
+		const faq = cb.settings[setting];
 		const [prompt, triggers] = faq.split(';;');
 		fuzzy_filters.set(
 			prompt,
@@ -691,7 +767,7 @@ cb.onStart(_ => {
 });
 
 cb.onBroadcastStop(_ => {
-	const bye_message = cb.settings.leave_msg;
+	const bye_message = SETTINGS.leave_msg;
 
 	if (bye_message) {
 		const now = new Date();
@@ -722,6 +798,6 @@ cb.onMessage(msg => {
 	}
 
 	const fuzzed_faq = fuzzIter(msg.m);
-	if (fuzzed_faq !== undefined) return success(fuzzed_faq, msg.user);
+	if (isString(fuzzed_faq)) return success(fuzzed_faq, msg.user);
 	return msg;
 });

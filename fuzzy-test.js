@@ -10,7 +10,7 @@ class Analyzer {
 	}
 
 	get match_ratio() {
-		return this.scores.filter(s => s && s > -2000).length / this.scores.length;
+		return this.scores.filter(s => s && s > -1000).length / this.scores.length;
 	}
 
 	get mean() {
@@ -365,8 +365,7 @@ const FUZZ_CHECK_LIM = 120, // past this message length, the fuzzer will not ana
 	FUZZ_MAX_RANGE = 150, // lower is more discriminant
 	FUZZ_MIN_RATIO = 0.85; // higher is more discriminant (0 to 1)
 
-const TEST_MSG =
-	'Hi first time in your room miss muffet, are you new? HOW OLD ARE YOU? lol we placed third. You are so mirthy and hilarious';
+const TEST_MSG = 'Hi first time in your room miss muffet? HOW OLD aer YOU? ';
 const FUZZY_ARGS = 'how old are you'.split(' ');
 
 // fuzzy validator
