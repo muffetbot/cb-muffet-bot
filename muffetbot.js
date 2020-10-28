@@ -466,9 +466,13 @@ class Fuzzy extends Analyzer {
 		}
 	}
 
+	static qObjify(query) {
+		return { q: query };
+	}
+
 	static getPreparedQuery(query) {
 		if (query.length > 999) return this.prepareLowerCodes(query);
-		const q_obj = { q: query };
+		const q_obj = this.qObjify(query);
 		let query_prepared = this.prepared_query_cache.get(q_obj);
 		if (query_prepared !== undefined) return query_prepared;
 		query_prepared = this.prepareLowerCodes(query);
