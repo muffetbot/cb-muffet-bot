@@ -268,9 +268,7 @@ class Analyzer {
  cache is static, so can be cleared after set interval
  self-purging for garbage collection
  USAGE: access data via Analyzer parent class methods after using run() method
- 
- TODO: maybe use WeakMap instead of Map for cache
-*/
+ */
 class Fuzzy extends Analyzer {
 	constructor(target, ...queries) {
 		super();
@@ -371,9 +369,7 @@ class Fuzzy extends Analyzer {
 							break;
 						}
 						++target_i;
-					} else {
-						target_i = next_beginning_indexes[target_i];
-					}
+					} else target_i = next_beginning_indexes[target_i];
 				}
 			}
 
@@ -449,9 +445,7 @@ class Fuzzy extends Analyzer {
 							break;
 						}
 						++target_i;
-					} else {
-						target_i = next_beginning_indexes[target_i];
-					}
+					} else target_i = next_beginning_indexes[target_i];
 				}
 			}
 		{
@@ -474,10 +468,11 @@ class Fuzzy extends Analyzer {
 
 	static getPreparedQuery(query) {
 		if (query.length > 999) return this.prepareLowerCodes(query);
-		let query_prepared = this.prepared_query_cache.get(query);
+		const q_obj = { q: query };
+		let query_prepared = this.prepared_query_cache.get(q_obj);
 		if (query_prepared !== undefined) return query_prepared;
 		query_prepared = this.prepareLowerCodes(query);
-		this.prepared_query_cache.set(query, query_prepared);
+		this.prepared_query_cache.set(q_obj, query_prepared);
 		return query_prepared;
 	}
 
@@ -493,9 +488,8 @@ class Fuzzy extends Analyzer {
 		const str_len = str.length,
 			lower_codes = [],
 			lower = str.toLowerCase();
-		for (let i = 0; i < str_len; i++) {
-			lower_codes[i] = lower.charCodeAt(i);
-		}
+
+		for (let i = 0; i < str_len; i++) lower_codes[i] = lower.charCodeAt(i);
 		return lower_codes;
 	}
 
@@ -528,9 +522,8 @@ class Fuzzy extends Analyzer {
 			last_is_beginning_i = 0;
 
 		for (let i = 0; i < this.target_len; i++) {
-			if (last_is_beginning > i) {
-				next_beginning_indexes[i] = last_is_beginning;
-			} else {
+			if (last_is_beginning > i) next_beginning_indexes[i] = last_is_beginning;
+			else {
 				last_is_beginning = beginning_indexes[++last_is_beginning_i];
 				next_beginning_indexes[i] = last_is_beginning === undefined ? last_is_beginning : this.target_len;
 			}
@@ -547,17 +540,16 @@ class Fuzzy extends Analyzer {
 	}
 
 	run(allow_typo = true) {
-		for (const query of this.queries) {
-			const score = allow_typo ? this.algorithm(query) : this.algorithmPunishTypo(query);
-			this.scores.push(score);
-		}
+		const algorithm = allow_typo ? this.algorithm.bind(this) : this.algorithmPunishTypo.bind(this);
+		for (const query of this.queries) this.scores.push(algorithm(query));
 		this.cleanup();
 		return this;
 	}
 }
 
 // bypass cb parser error
-Reflect.set(Fuzzy, 'prepared_query_cache', new Map());
+Reflect.set(Fuzzy, 'prepared_query_cache', new WeakMap());
+Object.freeze(Fuzzy);
 
 /*
  COMMANDS OBJECT
@@ -592,9 +584,7 @@ const COMMANDS = {
 				failed.push(prompt);
 			}
 
-			if (!failed.length) {
-				return `${added} FAQ's successfully added!`;
-			}
+			if (!failed.length) return `${added} FAQ's successfully added!`;
 
 			warn(`${failed.join('; ')} already exist!`, user);
 			if (added) return `${added} FAQ's added`;
@@ -675,9 +665,7 @@ const COMMANDS = {
 				const c = COMMANDS[cmd];
 				if (c.restricted) {
 					if (hasPrivileges(obj.user)) help.push(`${cmd}: ${c.help}`);
-				} else {
-					help.push(`${cmd}: ${c.help}`);
-				}
+				} else help.push(`${cmd}: ${c.help}`);
 			}
 
 			return help.join('\n');
@@ -717,9 +705,8 @@ Object.freeze(COMMANDS);
 
 // fuzzy validator
 function fuzzMatch(fuzzy) {
-	if (fuzzy.match_ratio < SETTINGS.fuzz_min_ratio || fuzzy.range > SETTINGS.fuzz_max_range) return false;
+	return fuzzy.match_ratio < SETTINGS.fuzz_min_ratio || fuzzy.range > SETTINGS.fuzz_max_range;
 	// TODO: refine match criteria
-	return true;
 }
 
 // fuzzy matcher
@@ -746,8 +733,9 @@ cb.onStart(_ => {
 	if (ok) SETTINGS.colors.ok = ok;
 	if (err) SETTINGS.colors.err = err;
 
-	for (const attr of ['fuzz_check_lim', 'fuzz_max_range', 'fuzz_min_ratio', 'leave_msg'])
-		SETTINGS[attr] = cb.settings[attr];
+	for (const attr of ['fuzz_check_lim', 'fuzz_max_range', 'fuzz_min_ratio', 'leave_msg']) {
+		if (SETTINGS[attr]) SETTINGS[attr] = cb.settings[attr];
+	}
 
 	const settings = Reflect.ownKeys(cb.settings);
 

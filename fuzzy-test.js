@@ -1,5 +1,7 @@
 class Analyzer {
-	scores = [];
+	constructor() {
+		this.scores = [];
+	}
 
 	static avg(arr) {
 		return arr.reduce((a, c) => (a += c)) / arr.length;
@@ -76,12 +78,10 @@ class Analyzer {
 }
 
 class Fuzzy extends Analyzer {
-	static prepared_query_cache = new Map();
-	matches_simple = [];
-	matches_strict = [];
-
 	constructor(target, ...queries) {
 		super();
+		this.matches_simple = [];
+		this.matches_strict = [];
 		this.target = target;
 		this.queries = [...queries].map(q => Fuzzy.getPreparedQuery(q));
 		return this;
@@ -280,10 +280,11 @@ class Fuzzy extends Analyzer {
 
 	static getPreparedQuery(query) {
 		if (query.length > 999) return this.prepareLowerCodes(query);
-		let query_prepared = this.prepared_query_cache.get(query);
+		const q_obj = { q: query };
+		let query_prepared = this.prepared_query_cache.get(q_obj);
 		if (query_prepared !== undefined) return query_prepared;
 		query_prepared = this.prepareLowerCodes(query);
-		this.prepared_query_cache.set(query, query_prepared);
+		this.prepared_query_cache.set(q_obj, query_prepared);
 		return query_prepared;
 	}
 
@@ -353,13 +354,17 @@ class Fuzzy extends Analyzer {
 	}
 
 	run(allow_typo = true) {
+		const algorithm = allow_typo ? this.algorithm.bind(this) : this.algorithmPunishTypo.bind(this);
 		for (const query of this.queries) {
-			const score = allow_typo ? this.algorithm(query) : this.algorithmPunishTypo(query);
+			const score = algorithm(query);
 			this.scores.push(score);
 		}
 		return this;
 	}
 }
+
+Reflect.set(Fuzzy, 'prepared_query_cache', new WeakMap());
+Object.freeze(Fuzzy);
 
 const FUZZ_CHECK_LIM = 120, // past this message length, the fuzzer will not analyze the message
 	FUZZ_MAX_RANGE = 150, // lower is more discriminant
